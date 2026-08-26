@@ -512,6 +512,16 @@ const AM = (() => {
 
     onRx(fn) { this._rxListeners.push(fn); }
     onDisconnect(fn) { this._disconnectListeners.push(fn); }
+    /** Одноразовый слушатель разрыва связи; возвращает функцию отписки. */
+    onceDisconnect(fn) {
+      const wrap = () => { this._offDisconnect(wrap); fn(); };
+      this._disconnectListeners.push(wrap);
+      return () => this._offDisconnect(wrap);
+    }
+    _offDisconnect(fn) {
+      const i = this._disconnectListeners.indexOf(fn);
+      if (i >= 0) this._disconnectListeners.splice(i, 1);
+    }
     _emitRx(v) { for (const f of this._rxListeners) { try { f(v); } catch (e) { /* ignore */ } } }
     _removeRx(fn) {
       const i = this._rxListeners.indexOf(fn);

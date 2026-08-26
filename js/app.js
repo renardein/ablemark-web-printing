@@ -1265,21 +1265,26 @@
       log(t('sent_bytes', { n: totalBytes }), 'ok');
 
       const reply = await new Promise((resolve) => {
+        // разрыв после отправки всех данных = неявный успех:
+        // принтер отпечатал и выключился (как waitForPrintResult в thermoprint)
+        const offDisc = port.onceDisconnect(() => { resolve({ implicit: true }); });
         const timer = setTimeout(() => {
           const i = port._rxListeners.indexOf(fn);
           if (i >= 0) port._rxListeners.splice(i, 1);
+          offDisc();
           resolve(null);
         }, 5000);
         const fn = (v) => {
           clearTimeout(timer);
+          offDisc();
           const i = port._rxListeners.indexOf(fn);
           if (i >= 0) port._rxListeners.splice(i, 1);
           resolve(v);
         };
         port._rxListeners.push(fn);
       });
-      if (reply && (reply[0] === 0xaa || reply[0] === 0x4f || reply[0] === 0x4b)) {
-        log(t('ack_ok'), 'ok');
+      if (reply && (reply.implicit || reply[0] === 0xaa || reply[0] === 0x4f || reply[0] === 0x4b)) {
+        log(reply.implicit ? t('ack_implicit') : t('ack_ok'), 'ok');
         els.btnPrint.textContent = t('done_ok');
         els.printStatus.textContent = t('done_ok');
       } else {
