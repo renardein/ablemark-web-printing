@@ -501,5 +501,27 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   }
 }
 
+  // плотность: команда и байты по профилю модели
+  {
+    const p15 = AM.modelProfile('P15');
+    eq('density P15 (thickness) d=0', AM.densityCommandFor(p15, 0), [0x10, 0xff, 0x10, 0x00, 0x00]);
+    eq('density P15 (thickness) d=1', AM.densityCommandFor(p15, 1), [0x10, 0xff, 0x10, 0x00, 0x01]);
+    eq('density P15 (thickness) d=2', AM.densityCommandFor(p15, 2), [0x10, 0xff, 0x10, 0x00, 0x02]);
+    const p50 = AM.modelProfile('P50');
+    eq('density P50 (density) d=0 → 1F 70 02 02', AM.densityCommandFor(p50, 0), [0x1f, 0x70, 0x02, 0x02]);
+    eq('density P50 d=1 → 5', AM.densityCommandFor(p50, 1), [0x1f, 0x70, 0x02, 0x05]);
+    eq('density P50 d=2 → 15', AM.densityCommandFor(p50, 2), [0x1f, 0x70, 0x02, 0x0f]);
+    const d100 = AM.modelProfile('D100');
+    eq('density D100 d=2 → 15', AM.densityCommandFor(d100, 2), [0x1f, 0x70, 0x02, 0x0f]);
+    eq('density D100 d=0 → 1', AM.densityCommandFor(d100, 0), [0x1f, 0x70, 0x02, 0x01]);
+    // поток печати с профилем: P15-плотность уходит как толщина
+    const m = { data: new Uint8Array([0xf0]), bpr: 1, height: 1 };
+    const s = AM.buildPrintStream(m, { protocol: 'l', profile: p15, density: 2, copies: 1, paperType: 3 });
+    ok('buildPrintStream использует thickness для P15', s.length > 4 && s[0] === 0x10 && s[1] === 0xff && s[2] === 0x10 && s[3] === 0x00 && s[4] === 0x02);
+    // без профиля — прежнее поведение (1F 70 02 d)
+    const s2 = AM.buildPrintStream(m, { protocol: 'l', density: 1, copies: 1, paperType: 3 });
+    ok('buildPrintStream без профиля → 1F 70', s2[0] === 0x1f && s2[1] === 0x70 && s2[2] === 0x02 && s2[3] === 0x01);
+  }
+
 console.log(failed === 0 ? '\nВСЕ ТЕСТЫ ПРОЙДЕНЫ' : `\nПРОВАЛЕНО: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

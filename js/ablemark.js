@@ -325,24 +325,36 @@ const AM = (() => {
       match: /^(P11|P12|P15|P7R?|P1S|S15|S12|M1|A1|LP15|LP90|LPC74|YEW12|Silvertec|BARABOGO|iSPACE)/i,
       protocol: 'l', direction: 1, dpi: 8, paper: [40, 30], paperType: 3,
       packetSize: 95, packetDelayMs: 30,
+      // Marklife P15/P12/P7: плотность через толщину (10 FF 10 00 TT, hardware-проверено
+      // в thermoprint); UI-плотность 0/1/2 → байты [0,1,2]
+      densityCommand: 'thickness',
+      densityMap: [0, 1, 2],
     },
     {
       id: 'p50', title: 'P50/S2/T2/M50/M57/X2/M60/ET-Z/Jammuk',
       match: /^(P50|P5OS|PS50|P50S|T2|M50|M57|S2|Jammuk|ET-Z|X2|M60|X8|D210)/i,
       protocol: 'p50', direction: 2, dpi: 8, paper: [50, 30], paperType: 2,
       packetSize: 95, packetDelayMs: 30,
+      // X2Protocol: app-density 1→2, 2→5, 5→15 → наша шкала 0/1/2 → [2,5,15]
+      densityCommand: 'density',
+      densityMap: [2, 5, 15],
     },
     {
       id: 'p80', title: 'P80/P80S/T3',
       match: /^(P80S?|T3)/i,
       protocol: 'l', direction: 2, dpi: 8, paper: [40, 30], paperType: 3,
       packetSize: 237, packetDelayMs: 30,
+      densityCommand: 'density',
+      densityMap: [0, 1, 2],
     },
     {
       id: 'd100', title: 'D100/D200/X4/L100',
       match: /^(D100|D200|X4|L100|U210)/i,
       protocol: 'p50', direction: 3, dpi: 8, paper: [40, 30], paperType: 2,
       packetSize: 237, packetDelayMs: 30,
+      // CAPrint: 1/7/15 (из RE thermoprint)
+      densityCommand: 'density',
+      densityMap: [1, 7, 15],
     },
   ];
 
@@ -350,7 +362,23 @@ const AM = (() => {
     id: 'default', title: 'неизвестная модель', protocol: 'l', direction: 2,
     dpi: 8, paper: [40, 30], paperType: 3,
     packetSize: 237, packetDelayMs: 30,
+    densityCommand: 'density',
+    densityMap: [0, 1, 2],
   };
+
+  /**
+   * Команда установки плотности для профиля: Marklife L-серия использует
+   * толщину (10 FF 10 00 TT), остальные — 1F 70 t d. Значение берётся из
+   * densityMap профиля (индекс = UI-плотность 0=светлая/1=норма/2=тёмная).
+   */
+  function densityCommandFor(profile, uiDensity) {
+    const d = Math.max(0, Math.min(2, uiDensity | 0));
+    const value = (profile && profile.densityMap) ? profile.densityMap[d] : d;
+    if (profile && profile.densityCommand === 'thickness') {
+      return CMD.setThickness(value);
+    }
+    return CMD.setDensity(2, value);
+  }
 
   /** Профиль модели по имени устройства. */
   function modelProfile(name) {
@@ -869,7 +897,7 @@ const AM = (() => {
 
     if (proto === 'l') {
       // p112Print / R15Protocol: плотность → [wakeup → enable → растр → прогон → stop] × N
-      parts.push(CMD.setDensity(2, opts.density ?? 1));
+      parts.push(densityCommandFor(opts.profile, opts.density ?? 1));
       for (let i = 0; i < copies; i++) {
         parts.push(CMD.wakeupL());
         parts.push(CMD.enableL());
@@ -881,7 +909,7 @@ const AM = (() => {
     } else if (proto === 'p50') {
       // printS2 / p50Print: wakeup → density → [start → калибровка → растр → позиция → stop] × N
       parts.push(CMD.wakeupP());
-      parts.push(CMD.setDensity(2, opts.density ?? 1));
+      parts.push(densityCommandFor(opts.profile, opts.density ?? 1));
       for (let i = 0; i < copies; i++) {
         parts.push(CMD.startJobP());
         if (i === 0) parts.push(CMD.adjustAuto(81));
@@ -948,7 +976,7 @@ const AM = (() => {
 
   return {
     UUIDS, SERVICE_FILTERS, OPTIONAL_SERVICES, NAME_PREFIXES, CMD, STATUS, Parsers,
-    MODELS, DEFAULT_PROFILE, modelProfile, rotate1bpp, parseHex,
+    MODELS, DEFAULT_PROFILE, modelProfile, rotate1bpp, parseHex, densityCommandFor,
     AbleMarkPort, buildPrintStream, buildPrintCommands, buildPrintParts, compressedImage, gsV0,
     imageDataTo1bpp, imageDataTo1bppDither, concat, u8, hex, sleep,
   };

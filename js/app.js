@@ -1214,6 +1214,7 @@
     const direction = effectiveDirection();
     const opts = {
       protocol: selectedProtocol(),
+      profile, // для команды плотности конкретной модели
       density: parseInt(els.rngDensity.value, 10),
       copies: Math.max(1, parseInt(els.numCopies.value, 10) || 1),
       paperType: parseInt(els.selPaperType.value, 10),
