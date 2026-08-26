@@ -460,5 +460,44 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   ok('parseHex односимвольные', AM.parseHex('7'), [0x07]);
 }
 
+// --- buildPrintParts: preamble/bulk разрез ---
+{
+  const m = { data: new Uint8Array([0xf0, 0x00]), bpr: 1, height: 2 };
+  const img = AM.gsV0(m.data, 1, 2);
+
+  // l-протокол: preamble = [density, wakeup, enable], bulk = [растр, feed, stop]
+  {
+    const parts = AM.buildPrintParts(m, { protocol: 'l', density: 1, copies: 1, paperType: 1, feedDots: 100 });
+    ok('parts: одна пара', parts.length === 1);
+    const preambleOk = parts[0].preamble.length ===
+      AM.CMD.setDensity(2, 1).length + AM.CMD.wakeupL().length + AM.CMD.enableL().length;
+    ok('parts l: preamble = density+wakeup+enable', preambleOk);
+    const bulkExpect = AM.concat(img, AM.CMD.feedDots(100), AM.CMD.stopL());
+    eq('parts l: bulk = растр+feed+stop', parts[0].bulk, bulkExpect);
+    // конкатенация частей = старый buildPrintStream
+    eq('parts l: preamble+bulk = stream', AM.concat(parts[0].preamble, parts[0].bulk),
+      AM.buildPrintStream(m, { protocol: 'l', density: 1, copies: 1, paperType: 1, feedDots: 100 }));
+  }
+
+  // p50: preamble = [wakeup, density, start, adjust81], bulk = [сжатый растр, location, stop, adjust80]
+  {
+    const parts = AM.buildPrintParts(m, { protocol: 'p50', density: 2, copies: 1 });
+    const bulkExpect = AM.concat(
+      AM.compressedImage(m.data, 1, 2), AM.CMD.printerLocation(32, 0),
+      AM.CMD.stopJobP(), AM.CMD.adjustAuto(80));
+    eq('parts p50: bulk = zlib-растр+location+stop+adjust', parts[0].bulk, bulkExpect);
+    ok('parts p50: preamble содержит wakeup+start',
+      parts[0].preamble.length === AM.CMD.wakeupP().length + AM.CMD.setDensity(2, 2).length +
+      AM.CMD.startJobP().length + AM.CMD.adjustAuto(81).length);
+  }
+
+  // copies=3 → три пары
+  {
+    const parts = AM.buildPrintParts(m, { protocol: 'l', density: 1, copies: 3, paperType: 3 });
+    ok('parts: 3 копии = 3 пары', parts.length === 3 &&
+      parts.every(p => p.preamble.length === parts[0].preamble.length));
+  }
+}
+
 console.log(failed === 0 ? '\nВСЕ ТЕСТЫ ПРОЙДЕНЫ' : `\nПРОВАЛЕНО: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

@@ -1233,18 +1233,27 @@
         if (!mono.height) { log(t('empty_label'), 'warn'); return; }
         const rotated = AM.rotate1bpp(mono, direction);
         const copyOpts = incremental ? { ...opts, copies: 1 } : opts;
-        const stream = AM.buildPrintStream(rotated, copyOpts);
-        totalBytes += stream.length;
+        // preamble/bulk: setup отдельно, затем пауза на пополнение кредитов,
+        // затем растр непрерывным потоком (как Printer.printBitmap в thermoprint)
+        const parts = AM.buildPrintParts(rotated, copyOpts)[0];
+        totalBytes += parts.preamble.length + parts.bulk.length;
 
         log(t('print_log', {
           w: Editor.state.labelWmm, h: Editor.state.labelHmm,
           sw: mono.srcWidth, sh: mono.srcHeight, sc: mono.scale,
           d: dirText(direction), rw: rotated.bpr * 8, rh: rotated.height,
-          p: opts.protocol, n: stream.length,
+          p: opts.protocol, n: parts.preamble.length + parts.bulk.length,
         }) + (incremental ? ' · ' + t('copy_log', { i: copy + 1, n: opts.copies }) +
               (serialEl ? ' · ' + Editor.applySequence(serialEl, copy).text : '') : ''));
         if (copy > 0) await AM.sleep(300);
-        await port.write(stream, (pct) => {
+        if (parts.preamble.length) {
+          await port.write(parts.preamble, (pct) => {
+            els.btnPrint.textContent = `${t('sending')} ${pct}%`;
+          });
+          // даём принтеру обработать setup и вернуть кредиты — растр пойдёт без «дыр»
+          await port.waitForCredits(3, 1000);
+        }
+        await port.write(parts.bulk, (pct) => {
           els.btnPrint.textContent = incremental
             ? `${t('copy_log', { i: copy + 1, n: opts.copies })} · ${pct}%`
             : `${t('sending')} ${pct}%`;

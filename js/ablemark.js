@@ -787,6 +787,21 @@ const AM = (() => {
       }
     }
 
+    /** Ожидание накопления кредитов (до min штук или timeout). Для preamble/bulk ритма. */
+    waitForCredits(min = 3, timeoutMs = 1000) {
+      if (this.credit >= min) return Promise.resolve(true);
+      return new Promise(resolve => {
+        const started = Date.now();
+        const check = () => {
+          if (!this.device.gatt.connected) { resolve(false); return; }
+          if (this.credit >= min) { resolve(true); return; }
+          if (Date.now() - started >= timeoutMs) { resolve(false); return; }
+          setTimeout(check, 20);
+        };
+        check();
+      });
+    }
+
     /** Короткая команда + ожидание ответа. Ставится в очередь (не конкурирует с опросом). */
     async command(bytes, timeoutMs = 5000) {
       // сериализация: ждём, пока предыдущая команда/передача завершится
@@ -824,12 +839,13 @@ const AM = (() => {
 
   // ------------------------------------------------------- print builder ---
   /**
-   * Собирает поток печати по типу протокола.
+   * Собирает команды печати по типу протокола. Возвращает массив команд,
+   * где команда-растр помечена bulk:true (см. buildPrintParts).
    * @param {object} m {data, bpr, height} — 1bpp (уже повёрнут по paperDirection)
    * @param {object} opts {protocol, density, copies, paperType, feedDots, compressed}
    *   paperType: 1=непрерывная, 2=чёрная метка, 3=наклейка (gap)
    */
-  function buildPrintStream(m, opts) {
+  function buildPrintCommands(m, opts) {
     const parts = [];
     const proto = opts.protocol || 'l';
     const copies = Math.max(1, opts.copies || 1);
@@ -869,15 +885,57 @@ const AM = (() => {
       }
       parts.push(u8(0x0a));
     }
+    return parts;
+  }
+
+  /** Конкатенация команд в один байтовый поток (совместимость со старым API). */
+  function buildPrintStream(m, opts) {
     let out = new Uint8Array(0);
-    for (const p of parts) out = concat(out, p);
+    for (const p of buildPrintCommands(m, opts)) out = concat(out, p);
     return out;
+  }
+
+  /**
+   * Разбиение потока на {preamble, bulk} для кредитного ритма печати
+   * (как Printer.printBitmap в thermoprint): сначала уходят setup-команды
+   * (плотность/wakeup/enable/start), затем — после пополнения кредитов —
+   * растр с хвостовыми командами одним непрерывным потоком. Без этого
+   * принтер может начать печатать, имея в буфере лишь несколько строк.
+   * Для copies>1 возвращается массив пар [{preamble, bulk}] — по одной на копию.
+   */
+  function buildPrintParts(m, opts) {
+    const proto = opts.protocol || 'l';
+    const copies = Math.max(1, opts.copies || 1);
+    const concatAll = (arr) => {
+      let out = new Uint8Array(0);
+      for (const b of arr) out = concat(out, b);
+      return out;
+    };
+    // разрез: preamble = всё до первого bulk (команды растра), bulk = растр + хвост
+    const isImageCmd = (bytes) => {
+      if (proto === 'p50') return bytes[0] === 0x1f && bytes[1] === 0x10; // сжатый растр
+      return bytes[0] === 0x1d && bytes[1] === 0x76; // GS v 0
+    };
+
+    const commands = buildPrintCommands(m, { ...opts, copies: 1 });
+    let preamble = [], bulk = [], inBulk = false;
+    for (const cmd of commands) {
+      if (!inBulk && isImageCmd(cmd)) inBulk = true;
+      if (inBulk) bulk.push(cmd);
+      else preamble.push(cmd);
+    }
+    const pair = { preamble: concatAll(preamble), bulk: concatAll(bulk) };
+
+    // каждая копия — полная пара (как Printer.printBitmap в thermoprint)
+    const result = [];
+    for (let i = 0; i < copies; i++) result.push(pair);
+    return result;
   }
 
   return {
     UUIDS, SERVICE_FILTERS, OPTIONAL_SERVICES, NAME_PREFIXES, CMD, STATUS, Parsers,
     MODELS, DEFAULT_PROFILE, modelProfile, rotate1bpp, parseHex,
-    AbleMarkPort, buildPrintStream, compressedImage, gsV0,
+    AbleMarkPort, buildPrintStream, buildPrintCommands, buildPrintParts, compressedImage, gsV0,
     imageDataTo1bpp, imageDataTo1bppDither, concat, u8, hex, sleep,
   };
 })();
