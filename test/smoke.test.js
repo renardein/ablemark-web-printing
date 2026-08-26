@@ -284,7 +284,7 @@ const path = require('path');
     AM.AbleMarkPort.prototype.command = async function (bytes) {
       await this.write(bytes).catch(() => {});
       const h = AM.hex(bytes).replace(/\s+/g, ' ');
-      if (h.startsWith('10 ff 3d')) return window.__devMock.status;
+      if (h.startsWith('10 ff 40')) return window.__devMock.status;
       if (h.startsWith('10 ff 50')) return window.__devMock.battery;
       if (h.startsWith('10 ff 20 f1')) return window.__devMock.version;
       if (h.startsWith('10 ff 20 f2')) return window.__devMock.sn;
@@ -400,12 +400,12 @@ const path = require('path');
   // пресет-кнопка
   await page.evaluate(() => { window.__sentHex = []; });
   await page.evaluate(() => {
-    document.querySelector('[data-hex="10 FF 3D"]').click();
+    document.querySelector('[data-hex="10 FF 40"]').click();
   });
   await new Promise(r => setTimeout(r, 300));
   hexSent = await page.evaluate(() => window.__sentHex[0]);
   console.log('preset sent:', hexSent);
-  if (hexSent !== '10 ff 3d') errors.push('пресет консоли: ' + hexSent);
+  if (hexSent !== '10 ff 40') errors.push('пресет консоли: ' + hexSent);
 
   // слитный hex
   await page.evaluate(() => { window.__sentHex = []; document.getElementById('hexInput').value = ''; });

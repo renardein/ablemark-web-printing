@@ -90,9 +90,9 @@
   }
 
   function handlePrinterReply(v) {
-    if (v.length === 2 && v[0] === 0xff) {
-      const s = { 1: t('status_no_paper'), 2: t('status_cover_open'), 3: t('status_overheat'), 4: t('status_low_bat'), 5: t('status_cover_closed') }[v[1]];
-      if (s) log(`${t('printer')}: ${s}`, v[1] === 5 ? 'ok' : 'warn');
+    if (v.length >= 2 && v[0] === 0xff) {
+      const key = AM.Parsers.status(v);
+      if (key) log(`${t('printer')}: ${t('status_' + key)}`, key === 'cover_closed' ? 'ok' : 'warn');
       return;
     }
     const printable = Array.from(v, b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '').join('');
@@ -1002,19 +1002,19 @@
       } catch (_) { noReply++; return null; }
     };
 
-    // статус
-    const st = await step(AM.CMD.queryStatus(), (v) => AM.Parsers.status(v));
-    if (st != null) {
-      const stTxt = st === 0 ? t('status_ok')
-        : st === 1 ? '⏳ print'
-        : st === 2 ? t('status_cover_open')
-        : st === 3 ? t('status_no_paper')
-        : st === 4 ? t('status_low_bat')
-        : st === 5 ? t('status_overheat')
-        : '?';
-      setVal(devEls.status, st === 0 ? `<span class="ok">${stTxt}</span>` : `<span class="crit">${stTxt}</span>`);
+    // статус (10 FF 40 → [FF, код]; fallback — детальный 1F 20 00 с флагами)
+    const stKey = await step(AM.CMD.queryStatus(), (v) => AM.Parsers.status(v));
+    if (stKey != null) {
+      const isOk = stKey === 'ok' || stKey === 'cover_closed';
+      setVal(devEls.status, `<span class="${isOk ? 'ok' : 'crit'}">${t('status_' + stKey)}</span>`);
     } else {
-      setVal(devEls.status, `<span class="muted">${t('no_reply')}</span>`);
+      const detKey = await step(AM.CMD.queryDetailedStatus(), (v) => AM.Parsers.status(v));
+      if (detKey != null) {
+        const isOk = detKey === 'ok' || detKey === 'cover_closed';
+        setVal(devEls.status, `<span class="${isOk ? 'ok' : 'crit'}">${t('status_' + detKey)}</span>`);
+      } else {
+        setVal(devEls.status, `<span class="muted">${t('no_reply')}</span>`);
+      }
     }
 
     // батарея

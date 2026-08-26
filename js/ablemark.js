@@ -130,7 +130,11 @@ const AM = (() => {
     escInit: () => u8(0x1b, 0x40),
     beep: () => u8(0x07),
     // запросы
-    queryStatus: () => u8(0x10, 0xff, 0x3d),
+    // Статус: 10 FF 40 (Guava SignedBytes.MAX_POWER_OF_TWO в оригинале,
+    // подтверждено thermoprint). Ответ: [FF, код].
+    queryStatus: () => u8(0x10, 0xff, 0x40),
+    /** Детальный статус: 1F 20 00 — ответ с битовыми флагами. */
+    queryDetailedStatus: () => u8(0x1f, 0x20, 0x00),
     queryBattery: () => u8(0x10, 0xff, 0x50, 0xf1),
     queryVersion: () => u8(0x10, 0xff, 0x20, 0xf1),
     querySN: () => u8(0x10, 0xff, 0x20, 0xf2),
@@ -192,17 +196,27 @@ const AM = (() => {
 
   // -------------------------------------------- парсеры ответов (YXQProtocolTools) ---
   const Parsers = {
-    /** Статус (биты: 1=печать, 2=крышка, 4=нет бумаги, 8=батарея, 16=перегрев). */
+    /**
+     * Статус. Два формата:
+     *  - [FF, код] — ответ на 10 FF 40 и асинхронные уведомления (коды 1-5);
+     *  - битовые флаги — ответ на 1F 20 00 (детальный запрос):
+     *    бит1=печать, бит2=крышка, бит4=нет бумаги, бит8=батарея, бит16=перегрев.
+     * Возвращает ключ статуса ('ok'|'printing'|'no_paper'|'cover_open'|
+     * 'overheat'|'low_bat'|'cover_closed') или null.
+     */
     status(v) {
       if (!v || !v.length) return null;
+      if (v[0] === 0xff && v.length >= 2) {
+        return STATUS[v[1]] || null;
+      }
       const b = v[0];
-      if (!b) return 0;
-      if (b & 1) return 1;
-      if (b & 2) return 2;
-      if (b & 4) return 3;
-      if (b & 16) return 5;
-      if (b & 8) return 4;
-      return 0;
+      if (!b) return 'ok';
+      if (b & 1) return 'printing';
+      if (b & 2) return 'cover_open';
+      if (b & 4) return 'no_paper';
+      if (b & 16) return 'overheat';
+      if (b & 8) return 'low_bat';
+      return 'ok';
     },
 
     /** Батарея: bArr[1] (или bArr[4] для LP90); для X8 — JSON {"bat":N}. */
@@ -289,9 +303,10 @@ const AM = (() => {
     },
   };
 
+  /** Код из ответа [FF, xx] (10 FF 40) → ключ i18n status_*. */
   const STATUS = {
-    1: 'нет бумаги', 2: 'открыта крышка', 3: 'перегрев',
-    4: 'низкий заряд батареи', 5: 'крышка закрыта',
+    1: 'no_paper', 2: 'cover_open', 3: 'overheat',
+    4: 'low_bat', 5: 'cover_closed',
   };
 
   // ------------------------------------------------------ модели принтеров ---

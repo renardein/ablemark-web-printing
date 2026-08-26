@@ -39,7 +39,6 @@ eq('printerLocation(32,0)', AM.CMD.printerLocation(32, 0), [0x1f, 0x12, 0x20, 0x
 eq('setDensity(2,1)', AM.CMD.setDensity(2, 1), [0x1f, 0x70, 0x02, 0x01]);
 eq('feedDots(100)', AM.CMD.feedDots(100), [0x1b, 0x4a, 0x64]);
 eq('feedToMark', AM.CMD.feedToMark(), [0x1d, 0x0c]);
-eq('queryStatus', AM.CMD.queryStatus(), [0x10, 0xff, 0x3d]);
 eq('queryBattery', AM.CMD.queryBattery(), [0x10, 0xff, 0x50, 0xf1]);
 eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
 
@@ -333,15 +332,27 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   const P = AM.Parsers;
   const num = (name, a, b) => ok(name, a === b); // eq не умеет числа
 
-  // статус (биты)
-  num('status: ok', P.status(new Uint8Array([0x00])), 0);
-  num('status: печать (бит 1)', P.status(new Uint8Array([0x01])), 1);
-  num('status: крышка (бит 2)', P.status(new Uint8Array([0x02])), 2);
-  num('status: нет бумаги (бит 4)', P.status(new Uint8Array([0x04])), 3);
-  num('status: перегрев (бит 16)', P.status(new Uint8Array([0x10])), 5);
-  num('status: батарея (бит 8)', P.status(new Uint8Array([0x08])), 4);
-  num('status: приоритет печати', P.status(new Uint8Array([0x1f])), 1);
-  num('status: null', P.status(null), null);
+  // статус: [FF, код] — ответ на 10 FF 40
+  num('status [FF,1] → no_paper', P.status(new Uint8Array([0xff, 0x01])), 'no_paper');
+  num('status [FF,2] → cover_open', P.status(new Uint8Array([0xff, 0x02])), 'cover_open');
+  num('status [FF,3] → overheat', P.status(new Uint8Array([0xff, 0x03])), 'overheat');
+  num('status [FF,4] → low_bat', P.status(new Uint8Array([0xff, 0x04])), 'low_bat');
+  num('status [FF,5] → cover_closed', P.status(new Uint8Array([0xff, 0x05])), 'cover_closed');
+  num('status [FF,9] → null (неизвестный код)', P.status(new Uint8Array([0xff, 0x09])), null);
+  // статус: битовые флаги — ответ на 1F 20 00
+  num('status flags 0x00 → ok', P.status(new Uint8Array([0x00])), 'ok');
+  num('status flags 0x01 → printing', P.status(new Uint8Array([0x01])), 'printing');
+  num('status flags 0x02 → cover_open', P.status(new Uint8Array([0x02])), 'cover_open');
+  num('status flags 0x04 → no_paper', P.status(new Uint8Array([0x04])), 'no_paper');
+  num('status flags 0x10 → overheat', P.status(new Uint8Array([0x10])), 'overheat');
+  num('status flags 0x08 → low_bat', P.status(new Uint8Array([0x08])), 'low_bat');
+  num('status flags 0x1f → printing (приоритет)', P.status(new Uint8Array([0x1f])), 'printing');
+  num('status null → null', P.status(null), null);
+  // STATUS-карта
+  num('STATUS map 1..5', !!(AM.STATUS[1] && AM.STATUS[2] && AM.STATUS[3] && AM.STATUS[4] && AM.STATUS[5]), true);
+  // команды
+  eq('queryStatus = 10 FF 40', AM.CMD.queryStatus(), [0x10, 0xff, 0x40]);
+  eq('queryDetailedStatus = 1F 20 00', AM.CMD.queryDetailedStatus(), [0x1f, 0x20, 0x00]);
 
   // батарея: bArr[1]
   num('battery: [.., 87]', P.battery(new Uint8Array([0x55, 87])), 87);
@@ -420,9 +431,9 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   eq('feedRowsEsc(3)', AM.CMD.feedRowsEsc(3), [0x1b, 0x64, 0x03]);
 
   // parseHex
-  ok('parseHex «10 FF 3D»', AM.parseHex('10 FF 3D'), [0x10, 0xff, 0x3d]);
-  ok('parseHex «10ff3d»', AM.parseHex('10ff3d'), [0x10, 0xff, 0x3d]);
-  ok('parseHex «0x10,0xff,0x3d»', AM.parseHex('0x10,0xff,0x3d'), [0x10, 0xff, 0x3d]);
+  eq('parseHex «10 FF 40»', AM.parseHex('10 FF 40'), [0x10, 0xff, 0x40]);
+  eq('parseHex «10ff3d»', AM.parseHex('10ff3d'), [0x10, 0xff, 0x3d]);
+  eq('parseHex «0x10,0xff,0x3d»', AM.parseHex('0x10,0xff,0x3d'), [0x10, 0xff, 0x3d]);
   ok('parseHex «1A 1F 06»', AM.parseHex('1A 1F 06'), [0x1a, 0x1f, 0x06]);
   ok('parseHex пусто → null', AM.parseHex('') === null);
   ok('parseHex мусор → null', AM.parseHex('zz qq') === null);
