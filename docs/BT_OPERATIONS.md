@@ -128,6 +128,8 @@ Java-байты со знаком: `-1=0xFF`, `-13=0xF3`, `-14=0xF2`, `-15=0xF1`
 | `10 FF 20 F1 10` | | BT-версия (PrintL11.printerBtVersion) |
 | `10 FF 20 F1 11` | | BT-имя (PrintL11.printerBtname) |
 | `10 FF 70 00` | | сброс к заводским (resetFactoryData `1F 50 BE`) |
+| `1F 40` | | тест-страница / самопроверка (selfCheck, подтверждено thermoprint) |
+| `10 FF F2` | | обратный прогон бумаги (backoffPaper, подтверждено thermoprint) |
 | `1A 1F 01` | | индукционная печать |
 | `1A 1F 02` | | индукционная печать (вариант 2) |
 | `1A 1F 05` | payload | encryption payload (P15R/A1/S12) |

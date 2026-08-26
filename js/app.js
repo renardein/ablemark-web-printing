@@ -1133,6 +1133,8 @@
   });
   $('#svcFeedMark').addEventListener('click', () => sendSvc(AM.CMD.feedToBlackMark(), t('feed_to_mark')));
   $('#svcInduction').addEventListener('click', () => sendSvc(AM.CMD.inductionPrint(), t('induction')));
+  $('#svcSelfCheck').addEventListener('click', () => sendSvc(AM.CMD.selfCheck(), t('self_check_done'), 8000));
+  $('#svcBackoff').addEventListener('click', () => sendSvc(AM.CMD.backoff(), t('backoff_done')));
   $('#svcFactoryReset').addEventListener('click', async () => {
     if (!confirm(t('factory_reset_confirm'))) return;
     await sendSvc(AM.CMD.factoryReset(), t('factory_reset_done'), 5000);

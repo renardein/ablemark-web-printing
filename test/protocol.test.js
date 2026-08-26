@@ -448,6 +448,8 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   eq('setPaperType(2,32)', AM.CMD.setPaperType(2, 32), [0x1f, 0x80, 0x02, 0x20]);
   eq('setThickness(5)', AM.CMD.setThickness(5), [0x10, 0xff, 0x10, 0x00, 0x05]);
   eq('feedRowsEsc(3)', AM.CMD.feedRowsEsc(3), [0x1b, 0x64, 0x03]);
+  eq('selfCheck', AM.CMD.selfCheck(), [0x1f, 0x40]);
+  eq('backoff', AM.CMD.backoff(), [0x10, 0xff, 0xf2]);
 
   // parseHex
   eq('parseHex «10 FF 40»', AM.parseHex('10 FF 40'), [0x10, 0xff, 0x40]);

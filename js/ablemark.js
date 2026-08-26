@@ -192,6 +192,10 @@ const AM = (() => {
     setThickness: (n) => u8(0x10, 0xff, 0x10, 0x00, n & 0xff),
     /** Прогон строк (ESC d n). */
     feedRowsEsc: (n) => u8(0x1b, 0x64, n & 0xff),
+    /** Тестовая страница (selfCheck). */
+    selfCheck: () => u8(0x1f, 0x40),
+    /** Обратный прогон бумаги (backoffPaper). */
+    backoff: () => u8(0x10, 0xff, 0xf2),
   };
 
   // -------------------------------------------- парсеры ответов (YXQProtocolTools) ---
