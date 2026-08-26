@@ -741,15 +741,14 @@ const AM = (() => {
         while (index < total) {
           if (!this.device.gatt.connected) throw new Error('Соединение потеряно');
           if (this.creditMode && this.credit <= 0) {
-            const ok = await this._waitCredits(10000);
+            // starvation recovery (как в оригинале): ждём кредиты до 1 с,
+            // затем форсируем 1 кредит и продолжаем — потерянные BLE-нотификации
+            // не должны намертво вешать печать
+            const ok = await this._waitCredits(1000);
             if (!ok && this.credit <= 0) {
+              this.credit = 1;
               this._creditTimeouts++;
-              if (this._creditTimeouts >= 2) {
-                this.log('Credits не поступают — перехожу на передачу без flow-control', 'warn');
-                this.creditMode = false;
-              } else {
-                throw new Error('Таймаут ожидания credits от принтера');
-              }
+              this.log(`Starvation recovery: форсирую 1 credit (эпизод #${this._creditTimeouts})`, 'warn');
             }
           }
           let len = Math.min(this.packetSize, total - index);
