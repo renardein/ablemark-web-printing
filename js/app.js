@@ -27,6 +27,7 @@
     logModal: $('#logModal'),
     connectModal: $('#connectModal'),
     templatesModal: $('#templatesModal'),
+    paletteModal: $('#paletteModal'),
     deviceModal: $('#deviceModal'),
     tplList: $('#tplList'),
     tplNameInput: $('#tplNameInput'),
@@ -693,6 +694,112 @@
     row('Y', numField(el.y, -500, 500, v => el.y = v));
   }
 
+  // ------------------------------------------------------ command palette (Ctrl+K) ---
+  const paletteInput = $('#paletteInput');
+  const paletteList = $('#paletteList');
+  let paletteSelIdx = 0;
+  let paletteFlat = []; // отфильтрованные команды текущего просмотра
+
+  const paletteCommands = () => ([
+    { group: 'add', ico: 'T',  key: 'cmd_add_text', hint: 'T', act: () => addElement('text') },
+    { group: 'add', ico: '▣',  key: 'cmd_add_qr', hint: 'Q', act: () => addElement('qr') },
+    { group: 'add', ico: '|||', key: 'cmd_add_barcode', hint: 'B', act: () => addElement('barcode') },
+    { group: 'add', ico: '🖼', key: 'cmd_add_image', hint: 'I', act: () => addElement('image') },
+    { group: 'add', ico: '🕐', key: 'cmd_add_date', hint: '', act: () => addElement('date') },
+    { group: 'add', ico: '#',  key: 'cmd_add_serial', hint: '', act: () => addElement('serial') },
+    { group: 'add', ico: '─',  key: 'cmd_add_line', hint: 'L', act: () => addElement('line') },
+    { group: 'add', ico: '▭',  key: 'cmd_add_shape', hint: 'S', act: () => addElement('shape') },
+    { group: 'add', ico: '▦',  key: 'cmd_add_table', hint: '', act: () => addElement('table') },
+    { group: 'add', ico: '₽',  key: 'cmd_add_price', hint: '', act: () => addElement('price') },
+    { group: 'add', ico: '📶', key: 'cmd_add_wifi', hint: '', act: () => addElement('wifi') },
+    { group: 'add', ico: '👤', key: 'cmd_add_vcard', hint: '', act: () => addElement('vcard') },
+    { group: 'add', ico: '🔗', key: 'cmd_add_url', hint: '', act: () => addElement('url') },
+    { group: 'file', ico: '↶', key: 'cmd_undo', hint: 'Ctrl+Z', act: () => { if (undo()) log(t('undo_log')); } },
+    { group: 'file', ico: '↷', key: 'cmd_redo', hint: 'Ctrl+Y', act: () => { if (redo()) log(t('redo_log')); } },
+    { group: 'file', ico: '🖨', key: 'cmd_print', hint: 'Ctrl+P', act: () => doPrint() },
+    { group: 'file', ico: '👁', key: 'cmd_preview', hint: '', act: () => $('#btnPreview').click() },
+    { group: 'file', ico: '💾', key: 'cmd_save_label', hint: 'Ctrl+S', act: () => $('#btnSave').click() },
+    { group: 'file', ico: '🗂', key: 'cmd_templates', hint: '', act: () => { renderTplList(); openModal(els.templatesModal); } },
+    { group: 'file', ico: '✕',  key: 'cmd_clear', hint: '', act: () => addElement('clear') },
+    { group: 'view', ico: '▦',  key: 'cmd_grid', hint: 'G', act: () => { Editor.state.showGrid = !Editor.state.showGrid; renderAll(); } },
+    { group: 'view', ico: '⤢',  key: 'cmd_fit', hint: '1', act: () => applyZoom(1) },
+    { group: 'view', ico: '🌐', key: 'cmd_lang', hint: '', act: () => $('#btnLang').click() },
+    { group: 'device', ico: 'ℹ', key: 'cmd_device_info', hint: '', act: () => $('#btnDeviceInfo').click() },
+    { group: 'device', ico: '⚙', key: 'cmd_settings', hint: '', act: () => openModal(els.settingsModal) },
+    { group: 'device', ico: '📜', key: 'cmd_journal', hint: '', act: () => openModal(els.logModal) },
+  ]);
+
+  const GROUP_ORDER = ['add', 'file', 'view', 'device'];
+
+  /** Подборка: подстрока или подпоследовательность в названии. */
+  function paletteMatch(cmd, query) {
+    const name = t(cmd.key).toLowerCase();
+    if (name.includes(query)) return true;
+    let qi = 0;
+    for (const ch of name) { if (qi < query.length && ch === query[qi]) qi++; }
+    return qi === query.length;
+  }
+
+  function renderPalette(query) {
+    const q = String(query || '').trim().toLowerCase();
+    const cmds = paletteCommands().filter(c => !q || paletteMatch(c, q));
+    paletteFlat = cmds;
+    paletteSelIdx = Math.min(paletteSelIdx, Math.max(0, cmds.length - 1));
+    paletteList.innerHTML = '';
+    if (!cmds.length) {
+      const empty = document.createElement('div');
+      empty.className = 'palette-empty';
+      empty.textContent = t('palette_empty');
+      paletteList.appendChild(empty);
+      return;
+    }
+    let lastGroup = null;
+    cmds.forEach((c, i) => {
+      if (c.group !== lastGroup) {
+        lastGroup = c.group;
+        const g = document.createElement('div');
+        g.className = 'palette-group';
+        g.textContent = t('cmd_group_' + c.group);
+        paletteList.appendChild(g);
+      }
+      const item = document.createElement('div');
+      item.className = 'palette-item' + (i === paletteSelIdx ? ' sel' : '');
+      item.innerHTML = `<span class="p-ico">${c.ico}</span><span class="p-name">${escapeHtml(t(c.key))}</span>` +
+        (c.hint ? `<span class="p-kbd">${c.hint}</span>` : '');
+      item.addEventListener('click', () => { execPalette(c); });
+      paletteList.appendChild(item);
+    });
+  }
+
+  function execPalette(cmd) {
+    closeModal(els.paletteModal);
+    try { cmd.act(); } catch (err) { log(`${t('error')}: ${err.message}`, 'err'); }
+  }
+
+  function openPalette() {
+    paletteInput.value = '';
+    paletteSelIdx = 0;
+    renderPalette('');
+    openModal(els.paletteModal);
+    setTimeout(() => paletteInput.focus(), 50);
+  }
+
+  paletteInput.addEventListener('input', () => { paletteSelIdx = 0; renderPalette(paletteInput.value); });
+  paletteInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      paletteSelIdx = Math.min(paletteSelIdx + 1, paletteFlat.length - 1);
+      renderPalette(paletteInput.value);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      paletteSelIdx = Math.max(paletteSelIdx - 1, 0);
+      renderPalette(paletteInput.value);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (paletteFlat[paletteSelIdx]) execPalette(paletteFlat[paletteSelIdx]);
+    }
+  });
+
   // ------------------------------------------------------ горячие клавиши ---
   let lastArrowTs = 0;
 
@@ -703,6 +810,13 @@
     if (e.key === 'Escape') {
       const open = $$('.modal').filter(m => !m.classList.contains('hidden'))[0];
       if (open) { open.classList.add('hidden'); e.preventDefault(); }
+      return;
+    }
+    const ctrlEarly = e.ctrlKey || e.metaKey;
+    if (ctrlEarly && (e.key === 'k' || e.key === 'K' || e.key === 'л' || e.key === 'Л')) {
+      e.preventDefault();
+      if (!els.paletteModal.classList.contains('hidden')) closeModal(els.paletteModal);
+      else openPalette();
       return;
     }
     if (isTypingTarget(e.target)) return;

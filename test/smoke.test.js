@@ -509,6 +509,37 @@ const path = require('path');
     if (saved < 3) errors.push('Ctrl+S не сохранил макет: ' + saved);
   }
 
+  // 18) command palette (Ctrl+K)
+  {
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyK'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 300));
+    const open = await page.evaluate(() => !document.getElementById('paletteModal').classList.contains('hidden'));
+    const itemCount = await page.evaluate(() => document.querySelectorAll('#paletteList .palette-item').length);
+    const hasPrint = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('#paletteList .palette-item .p-name')).some(e => /Печать|Print/.test(e.textContent)));
+    console.log('palette open:', open, '· команд:', itemCount, '· печать есть:', hasPrint);
+    if (!open) errors.push('Ctrl+K не открыл палитру');
+    if (itemCount < 20) errors.push('в палитре мало команд: ' + itemCount);
+    if (!hasPrint) errors.push('в палитре нет команды печати');
+
+    // фильтрация
+    await page.type('#paletteInput', 'qr');
+    await new Promise(r => setTimeout(r, 250));
+    const filtered = await page.evaluate(() => document.querySelectorAll('#paletteList .palette-item').length);
+    console.log('фильтр «qr»:', filtered, 'команд');
+    if (filtered < 1 || filtered >= itemCount) errors.push('фильтрация палитры не работает: ' + filtered);
+
+    // Enter исполняет первую отфильтрованную команду (добавляет QR)
+    const n0 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.press('Enter');
+    await new Promise(r => setTimeout(r, 300));
+    const n1 = await page.evaluate(() => Editor.state.elements.length);
+    const closed = await page.evaluate(() => document.getElementById('paletteModal').classList.contains('hidden'));
+    console.log('palette Enter: элементов', n0, '→', n1, '· закрыта:', closed);
+    if (n1 !== n0 + 1) errors.push('palette Enter не добавил QR');
+    if (!closed) errors.push('palette не закрылась после Enter');
+  }
+
   await page.screenshot({ path: path.join(__dirname, 'screenshot.png') });
 
   console.log(errors.length ? ('ОШИБКИ:\n' + errors.join('\n')) : 'SMOKE-TEST OK');
