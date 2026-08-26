@@ -432,7 +432,9 @@ const AM = (() => {
   }
 
   /**
-   * Полутона: Floyd–Steinberg (как BitmapFlex.convertGreyImgByFloyd в оригинале).
+   * Полутона: серпантинный Floyd–Steinberg (как PrintAlgorithmTools.serpentineDither
+   * в оригинале и thermoprint). Чётные строки идут слева направо, нечётные —
+   * справа налево: меньше направленных артефактов (бандинга).
    * Для фото/градиентов. Возвращает 1bpp MSB-first.
    */
   function imageDataTo1bppDither(imgData, width, height) {
@@ -445,17 +447,25 @@ const AM = (() => {
     }
     for (let y = 0; y < height; y++) {
       const rowOff = y * bpr;
-      for (let x = 0; x < width; x++) {
+      const leftToRight = y % 2 === 0;
+      const startX = leftToRight ? 0 : width - 1;
+      const endX = leftToRight ? width : -1;
+      const step = leftToRight ? 1 : -1;
+      for (let x = startX; x !== endX; x += step) {
         const idx = y * width + x;
         const old = gray[idx];
         const dark = old < 128;
         if (dark) out[rowOff + (x >> 3)] |= (0x80 >> (x & 7));
         const err = old - (dark ? 0 : 255);
-        if (x + 1 < width) gray[idx + 1] += err * 7 / 16;
+        // сосед «вперёд» по ходу строк; «назад» — в противоположную сторону
+        const fwd = x + step, back = x - step;
+        const hasFwd = leftToRight ? fwd < width : fwd >= 0;
+        const hasBack = leftToRight ? back >= 0 : back < width;
+        if (hasFwd) gray[idx + step] += err * 7 / 16;
         if (y + 1 < height) {
-          if (x > 0) gray[idx + width - 1] += err * 3 / 16;
-          gray[idx + width] += err * 5 / 16;
-          if (x + 1 < width) gray[idx + width + 1] += err * 1 / 16;
+          if (hasBack) gray[(y + 1) * width + back] += err * 3 / 16;
+          gray[(y + 1) * width + x] += err * 5 / 16;
+          if (hasFwd) gray[(y + 1) * width + fwd] += err * 1 / 16;
         }
       }
     }
