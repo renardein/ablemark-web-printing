@@ -462,6 +462,37 @@ const path = require('path');
     if (n5 !== n0 + 1) errors.push(`undo не вернул удалённый элемент: ${n5}`);
   }
 
+  // 17) quick-add клавиши + сетка
+  {
+    const n0 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.press('KeyT');
+    await new Promise(r => setTimeout(r, 200));
+    const n1 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.press('KeyQ');
+    await new Promise(r => setTimeout(r, 200));
+    const n2 = await page.evaluate(() => Editor.state.elements.length);
+    const hasQr = await page.evaluate(() => Editor.state.elements.some(e => e.type === 'qr'));
+    console.log(`quick-add: ${n0} → T ${n1} → Q ${n2} (qr: ${hasQr})`);
+    if (n1 !== n0 + 1 || n2 !== n0 + 2) errors.push('quick-add T/Q не работает');
+    if (!hasQr) errors.push('quick-add Q не добавил QR');
+
+    // сетка: G включает/выключает (проверяем состояние + перерисовку)
+    await page.keyboard.press('KeyG');
+    await new Promise(r => setTimeout(r, 200));
+    const gridOn = await page.evaluate(() => Editor.state.showGrid);
+    await page.keyboard.press('KeyG');
+    await new Promise(r => setTimeout(r, 200));
+    const gridOff = await page.evaluate(() => Editor.state.showGrid);
+    console.log('сетка G:', gridOn, '→', gridOff);
+    if (gridOn !== true || gridOff !== false) errors.push('переключение сетки (G) не работает');
+
+    // V снимает выделение
+    await page.keyboard.press('KeyV');
+    await new Promise(r => setTimeout(r, 150));
+    const selNull = await page.evaluate(() => Editor.state.selected === null);
+    if (!selNull) errors.push('V не снимает выделение');
+  }
+
   await page.screenshot({ path: path.join(__dirname, 'screenshot.png') });
 
   console.log(errors.length ? ('ОШИБКИ:\n' + errors.join('\n')) : 'SMOKE-TEST OK');

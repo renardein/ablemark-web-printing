@@ -33,11 +33,13 @@ const I18N = (() => {
       journal: 'Журнал',
       label: 'Наклейка',
       // канвас
-      canvas_hint: 'Перетаскивайте элементы · стрелки — перемещение (Shift = 10) · Tab — по элементам · Ctrl+C/V/X/D · Ctrl+Z/Y отмена/повтор · Ctrl+↑/↓ слои · +/− размер · R поворот · Del удалить',
+      canvas_hint: 'Перетаскивайте элементы · стрелки — перемещение (Shift = 10) · Tab — по элементам · Ctrl+C/V/X/D · Ctrl+Z/Y отмена/повтор · Ctrl+↑/↓ слои · +/− размер · R поворот · Del удалить · T/Q/B/I/L/S добавить · G сетка · 1 вписать · V снять',
       empty_canvas: 'Пустая наклейка — добавьте элементы слева',
       // undo/redo
       undo_log: 'Отменено',
       redo_log: 'Повторено',
+      grid_on: 'Сетка: вкл',
+      grid_off: 'Сетка: выкл',
       // панели
       tools: 'Инструменты',
       insert: 'Добавить',
@@ -268,10 +270,12 @@ const I18N = (() => {
       web_bt_unavailable: 'unavailable',
       journal: 'Journal',
       label: 'Label',
-      canvas_hint: 'Drag elements · arrows to move (Shift = 10) · Tab cycles · Ctrl+C/V/X/D · Ctrl+Z/Y undo/redo · Ctrl+↑/↓ layers · +/− size · R rotate · Del delete',
+      canvas_hint: 'Drag elements · arrows to move (Shift = 10) · Tab cycles · Ctrl+C/V/X/D · Ctrl+Z/Y undo/redo · Ctrl+↑/↓ layers · +/− size · R rotate · Del delete · T/Q/B/I/L/S add · G grid · 1 fit · V deselect',
       empty_canvas: 'Empty label — add elements from the left panel',
       undo_log: 'Undone',
       redo_log: 'Redone',
+      grid_on: 'Grid: on',
+      grid_off: 'Grid: off',
       tools: 'Tools',
       insert: 'Insert',
       elements: 'Elements',

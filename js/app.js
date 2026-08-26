@@ -337,53 +337,54 @@
   });
 
   // ------------------------------------------------------ добавление ---
-  $$('[data-add]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const type = btn.dataset.add;
-
-      if (type === 'clear') {
-        if (Editor.state.elements.length && confirm(t('confirm_clear'))) {
-          pushHistory();
-          Editor.state.elements = [];
-          Editor.state.selected = null;
-          refreshAll();
-          log(t('layout_cleared'));
-        }
-        return;
-      }
-
-      if (type === 'wifi' || type === 'vcard' || type === 'url') {
+  /** Добавить элемент типа type (общий путь для кнопок и quick-add клавиш). */
+  function addElement(type) {
+    if (type === 'clear') {
+      if (Editor.state.elements.length && confirm(t('confirm_clear'))) {
         pushHistory();
-        Editor.add(type);
+        Editor.state.elements = [];
+        Editor.state.selected = null;
         refreshAll();
-        return;
+        log(t('layout_cleared'));
       }
+      return;
+    }
 
-      if (type === 'image') {
-        els.fileInput.onchange = () => {
-          const file = els.fileInput.files[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => {
-            const img = new Image();
-            img.onload = () => {
-              pushHistory();
-              Editor.add('image', { img, src: reader.result, w: Math.min(Editor.widthDots(), Math.round(Editor.widthDots() * 0.8)) });
-              refreshAll();
-            };
-            img.src = reader.result;
-          };
-          reader.readAsDataURL(file);
-          els.fileInput.value = '';
-        };
-        els.fileInput.click();
-        return;
-      }
-
+    if (type === 'wifi' || type === 'vcard' || type === 'url') {
       pushHistory();
       Editor.add(type);
       refreshAll();
-    });
+      return;
+    }
+
+    if (type === 'image') {
+      els.fileInput.onchange = () => {
+        const file = els.fileInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            pushHistory();
+            Editor.add('image', { img, src: reader.result, w: Math.min(Editor.widthDots(), Math.round(Editor.widthDots() * 0.8)) });
+            refreshAll();
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+        els.fileInput.value = '';
+      };
+      els.fileInput.click();
+      return;
+    }
+
+    pushHistory();
+    Editor.add(type);
+    refreshAll();
+  }
+
+  $$('[data-add]').forEach(btn => {
+    btn.addEventListener('click', () => addElement(btn.dataset.add));
   });
 
   // ------------------------------------------------------ тулбар ---
@@ -753,6 +754,37 @@
       log(t('selected_elem', { i: i + 1, n: arr.length, t: TITLES[arr[i].type] ? TITLES[arr[i].type]() : arr[i].type }));
       e.preventDefault();
       return;
+    }
+
+    // quick-add и утилиты (одиночные клавиши, без модификаторов;
+    // R занята поворотом — фигура на S)
+    if (!ctrl && !e.altKey) {
+      const k = e.key.toLowerCase();
+      const quick = { t: 'text', q: 'qr', b: 'barcode', i: 'image', l: 'line', s: 'shape' }[k];
+      if (quick) {
+        if (e.repeat) { e.preventDefault(); return; }
+        addElement(quick);
+        e.preventDefault();
+        return;
+      }
+      if (k === 'g') {
+        Editor.state.showGrid = !Editor.state.showGrid;
+        renderAll();
+        log(Editor.state.showGrid ? t('grid_on') : t('grid_off'));
+        e.preventDefault();
+        return;
+      }
+      if (k === 'v') {
+        Editor.state.selected = null;
+        refreshAll();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === '1') {
+        applyZoom(1);
+        e.preventDefault();
+        return;
+      }
     }
 
     if (!sel) return;

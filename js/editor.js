@@ -81,10 +81,11 @@ const Editor = (() => {
     labelHmm: 30,
     dpi: 8,
     round: false,
-    zoom: 4,             // экранный px на печатную точку (в канвасе подбирается сам)
-    elements: [],        // стикеры
-    selected: null,      // выделенный стикер
-    viewScale: 4,        // текущий масштаб канваса (точка → экран)
+    showGrid: false,   // сетка выравнивания (1 мм ≈ 8 точек)
+    zoom: 2,            // масштаб предпросмотра
+    elements: [],       // стикеры
+    selected: null,     // выделенный стикер
+    viewScale: 4,       // текущий масштаб канваса (точка → экран)
   };
 
   const widthDots = () => Math.max(8, Math.round(state.labelWmm * state.dpi));
@@ -544,6 +545,25 @@ const Editor = (() => {
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, cw, ch);
     ctx.restore();
+
+    // сетка выравнивания (поверх белой наклейки, до элементов)
+    if (state.showGrid) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(79,140,255,.28)';
+      ctx.lineWidth = 1;
+      const step = state.dpi * vs; // 1 мм
+      ctx.beginPath();
+      for (let gx = step; gx < cw - 0.5; gx += step) { ctx.moveTo(Math.round(gx) + 0.5, 0); ctx.lineTo(Math.round(gx) + 0.5, ch); }
+      for (let gy = step; gy < ch - 0.5; gy += step) { ctx.moveTo(0, Math.round(gy) + 0.5); ctx.lineTo(cw, Math.round(gy) + 0.5); }
+      ctx.stroke();
+      // каждая клетка 10 мм — темнее
+      ctx.strokeStyle = 'rgba(79,140,255,.5)';
+      ctx.beginPath();
+      for (let gx = step * 10; gx < cw - 0.5; gx += step * 10) { ctx.moveTo(Math.round(gx) + 0.5, 0); ctx.lineTo(Math.round(gx) + 0.5, ch); }
+      for (let gy = step * 10; gy < ch - 0.5; gy += step * 10) { ctx.moveTo(0, Math.round(gy) + 0.5); ctx.lineTo(cw, Math.round(gy) + 0.5); }
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // контур круглой наклейки
     if (state.round && W === H) {
