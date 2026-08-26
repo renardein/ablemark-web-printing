@@ -738,6 +738,17 @@
       e.preventDefault();
       return;
     }
+    // Ctrl+P — печать (откроет подключение, если принтера нет), Ctrl+S — сохранить
+    if (ctrl && (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З')) {
+      e.preventDefault();
+      doPrint();
+      return;
+    }
+    if (ctrl && (e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы')) {
+      e.preventDefault();
+      $('#btnSave').click();
+      return;
+    }
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (sel) { deleteSelected(); e.preventDefault(); }

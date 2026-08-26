@@ -491,6 +491,22 @@ const path = require('path');
     await new Promise(r => setTimeout(r, 150));
     const selNull = await page.evaluate(() => Editor.state.selected === null);
     if (!selNull) errors.push('V не снимает выделение');
+
+    // Ctrl+P без принтера открывает окно подключения; Ctrl+S сохраняет макет
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyP'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 300));
+    const connectOpen = await page.evaluate(() => !document.getElementById('connectModal').classList.contains('hidden'));
+    await page.keyboard.press('Escape');
+    await new Promise(r => setTimeout(r, 150));
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyS'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 200));
+    const saved = await page.evaluate(() => {
+      const s = localStorage.getItem('ablemark.label');
+      return s ? JSON.parse(s).elements.length : -1;
+    });
+    console.log('Ctrl+P открыл подключение:', connectOpen, '· Ctrl+S сохранил элементов:', saved);
+    if (!connectOpen) errors.push('Ctrl+P не открыл окно подключения');
+    if (saved < 3) errors.push('Ctrl+S не сохранил макет: ' + saved);
   }
 
   await page.screenshot({ path: path.join(__dirname, 'screenshot.png') });
