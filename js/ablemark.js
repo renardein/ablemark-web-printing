@@ -774,6 +774,12 @@ const AM = (() => {
           index += len;
           const pct = Math.floor((index / total) * 100);
           if (pct !== lastReport) { lastReport = pct; onProgress && onProgress(pct, index, total); }
+          // pacing: ровно один пакет за интервал профиля (30 мс по умолчанию,
+          // как таймер в оригинальном приложении) — более быстрая отправка
+          // перегружает BLE-стек принтера, и он перестаёт выдавать кредиты
+          if (index < total && this._packetDelayMs > 0) {
+            await sleep(this._packetDelayMs);
+          }
         }
       } finally {
         this._sending = false;
