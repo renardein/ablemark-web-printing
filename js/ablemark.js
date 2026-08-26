@@ -548,6 +548,12 @@ const AM = (() => {
           // некоторым принтерам нужна пауза между connect и discover
           await sleep(150);
           await this._setupCharacteristics();
+          // Ждём стартовые кредиты на CX (обычно [01 04] приходит сразу после
+          // подписки): без них первая печать стартует с 0 кредитов и полагается
+          // на starvation recovery. Только если CX есть; до 3 с — потом идём дальше.
+          if (this.ctrlChar && this.credit <= 0) {
+            await this._waitForInitialCredits(3000);
+          }
           this.connected = true;
           this.log(`Подключено. Сервис ${this.serviceKind}, пакет ${this.packetSize} байт, credits: ${this.credit}`);
           return true;
@@ -672,6 +678,28 @@ const AM = (() => {
     _removeRxWaiter(fn) {
       const i = this._creditsWaiters.indexOf(fn);
       if (i >= 0) this._creditsWaiters.splice(i, 1);
+    }
+
+    /** Ожидание стартовых кредитов после подписки на CX (как Printer.connect в thermoprint). */
+    _waitForInitialCredits(timeoutMs = 3000) {
+      if (this.credit > 0) return Promise.resolve();
+      return new Promise(resolve => {
+        const started = Date.now();
+        this.log('Ожидание стартовых кредитов…');
+        const timer = setTimeout(() => {
+          this.log('Стартовые кредиты не пришли — продолжаю без них (включится starvation recovery)');
+          resolve();
+        }, timeoutMs);
+        const check = () => {
+          if (this.credit > 0 || !this.device.gatt.connected) {
+            clearTimeout(timer);
+            resolve();
+          } else if (Date.now() - started < timeoutMs) {
+            setTimeout(check, 50);
+          }
+        };
+        check();
+      });
     }
 
     async _writeOnce(chunk) {
