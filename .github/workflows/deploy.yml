@@ -1,0 +1,52 @@
+# Deploys the static web app (index.html + css/js/vendor) to GitHub Pages.
+#
+# Enable Pages in the repository settings:
+#   Settings → Pages → Source: "GitHub Actions"
+#
+# The site files are copied into `_site/` and published from there, so that
+# test/, docs/ and .github/ are not exposed on the public site.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build static site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r css js vendor _site/
+          cp .nojekyll _site/
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

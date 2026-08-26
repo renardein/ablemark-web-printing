@@ -1,0 +1,2 @@
+# Disable Jekyll processing on GitHub Pages so that files like docs/*.md
+# and the static site are served as-is.

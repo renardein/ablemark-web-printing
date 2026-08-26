@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AbleMark Web — Label Editor</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app" class="app">
+
+  <!-- ================================================== ВЕРХНЯЯ ПАНЕЛЬ -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">A4</span>
+      <div class="brand-text">
+        <b data-i18n="app_title">AbleMark Web</b>
+        <span class="muted" data-i18n="app_sub">Печать на Bluetooth термопринтерах</span>
+      </div>
+    </div>
+
+    <div class="topbar-center">
+      <button class="icon-btn" id="btnRotateAll" data-i18n-title="rotate_layout" title="Повернуть макет">⟳</button>
+      <span class="sep"></span>
+      <button class="icon-btn" id="btnZoomOut" data-i18n-title="zoom_out" title="Уменьшить">−</button>
+      <span class="zoom-label" id="zoomLabel">1.0×</span>
+      <button class="icon-btn" id="btnZoomIn" data-i18n-title="zoom_in" title="Увеличить">+</button>
+    </div>
+
+    <div class="topbar-right">
+      <span id="connBadge" class="badge"><span data-i18n="printer">Принтер</span>: <span data-i18n="not_connected">не подключён</span></span>
+      <button class="btn sm ghost" id="btnConnect" data-i18n="connect">Подключить</button>
+      <button class="btn sm ghost" id="btnDisconnect" data-i18n="disconnect" disabled>Отключить</button>
+      <button class="btn sm ghost" id="btnDeviceInfo" data-i18n="device_info" disabled>Об устройстве</button>
+      <span class="sep"></span>
+      <button class="btn sm ghost" id="btnPaper" data-i18n="label">Наклейка</button>
+      <button class="btn sm ghost" id="btnTemplates" data-i18n="templates">Шаблоны</button>
+      <button class="btn sm ghost" id="btnSettings" data-i18n="print_settings">Настройки печати</button>
+      <button class="btn sm ghost" id="btnLog" data-i18n="journal">Журнал</button>
+      <button class="btn sm ghost lang-btn" id="btnLang" data-i18n="language">English</button>
+    </div>
+  </header>
+
+  <!-- ================================================== ОСНОВНАЯ ОБЛАСТЬ -->
+  <div class="workspace">
+
+    <!-- ЛЕВАЯ ПАНЕЛЬ: вставка -->
+    <aside class="panel left-panel">
+      <section class="panel-card">
+        <h3 data-i18n="insert">Добавить</h3>
+        <div class="insert-grid">
+          <button class="ins-btn" data-add="text"><span class="t-ico">T</span><span data-i18n="type_text">Текст</span></button>
+          <button class="ins-btn" data-add="barcode"><span class="t-ico">|||</span><span data-i18n="type_barcode">Штрихкод</span></button>
+          <button class="ins-btn" data-add="qr"><span class="t-ico">▣</span><span data-i18n="type_qr">QR-код</span></button>
+          <button class="ins-btn" data-add="image"><span class="t-ico">🖼</span><span data-i18n="type_image">Фото</span></button>
+          <button class="ins-btn" data-add="date"><span class="t-ico">🕐</span><span data-i18n="type_date">Дата</span></button>
+          <button class="ins-btn" data-add="serial"><span class="t-ico">#</span><span data-i18n="type_serial">Номер</span></button>
+          <button class="ins-btn" data-add="line"><span class="t-ico">─</span><span data-i18n="type_line">Линия</span></button>
+          <button class="ins-btn" data-add="shape"><span class="t-ico">▭</span><span data-i18n="type_shape">Фигура</span></button>
+          <button class="ins-btn" data-add="table"><span class="t-ico">▦</span><span data-i18n="type_table">Таблица</span></button>
+          <button class="ins-btn" data-add="price"><span class="t-ico">₽</span><span data-i18n="type_price">Цена</span></button>
+          <button class="ins-btn" data-add="wifi"><span class="t-ico">📶</span><span data-i18n="type_wifi">Wi-Fi QR</span></button>
+          <button class="ins-btn" data-add="vcard"><span class="t-ico">👤</span><span data-i18n="type_vcard">Визитка QR</span></button>
+          <button class="ins-btn" data-add="url"><span class="t-ico">🔗</span><span data-i18n="type_url">Ссылка QR</span></button>
+          <button class="ins-btn" data-add="orgline"><span class="t-ico">☰</span><span data-i18n="type_orgline">Шапка</span></button>
+          <button class="ins-btn" data-add="rect"><span class="t-ico">▢</span><span data-i18n="type_rect">Рамка</span></button>
+          <button class="ins-btn danger" data-add="clear"><span class="t-ico">✕</span><span data-i18n="type_clear">Очистить</span></button>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <h3 data-i18n="layers">Слои</h3>
+        <div id="layersList" class="layers-list"></div>
+      </section>
+    </aside>
+
+    <!-- ЦЕНТР: канвас + тулбар -->
+    <main class="canvas-area">
+      <div class="canvas-toolbar" id="stickerTools">
+        <button class="tool-btn" id="toolDel" data-i18n-title="del" title="Удалить">🗑</button>
+        <button class="tool-btn" id="toolCopy" data-i18n-title="copy" title="Копировать">⧉</button>
+        <button class="tool-btn" id="toolBigger" data-i18n-title="bigger" title="Увеличить">＋</button>
+        <button class="tool-btn" id="toolSmaller" data-i18n-title="smaller" title="Уменьшить">－</button>
+        <button class="tool-btn" id="toolRotate" data-i18n-title="rotate" title="Поворот">⟳</button>
+        <button class="tool-btn" id="toolAlign" data-i18n-title="align" title="Выровнять">⇹</button>
+        <button class="tool-btn" id="toolLayerUp" data-i18n-title="layer_up" title="Слой выше">▲</button>
+        <button class="tool-btn" id="toolLayerDown" data-i18n-title="layer_down" title="Слой ниже">▼</button>
+        <span class="sep"></span>
+        <span class="tool-info" id="toolInfo"></span>
+      </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="editorCanvas"></canvas>
+        <div class="canvas-hint" id="canvasHint" data-i18n="canvas_hint">Перетаскивайте элементы · стрелки — перемещение (Shift = 10) · Tab — по элементам · Ctrl+C/V/X/D · Ctrl+↑/↓ слои · +/− размер · R поворот · Enter свойства · Del удалить</div>
+      </div>
+      <div class="canvas-bottom">
+        <button class="btn ghost" id="btnSave" data-i18n="save">Сохранить</button>
+        <button class="btn ghost" id="btnLoad" data-i18n="my_labels">Мои</button>
+        <button class="btn primary big" id="btnPrint" data-i18n="print">Печать</button>
+        <button class="btn ghost" id="btnPreview" data-i18n="print_preview">Предпросмотр печати</button>
+      </div>
+    </main>
+
+    <!-- ПРАВАЯ ПАНЕЛЬ: свойства -->
+    <aside class="panel right-panel">
+      <section class="panel-card props-card">
+        <h3 data-i18n="properties">Свойства</h3>
+        <div id="propsBody" class="props-body">
+          <div class="no-selection" id="noSelection">
+            <span data-i18n="no_selection">Ничего не выделено</span>
+            <small class="muted" data-i18n="no_selection_hint">Выберите элемент на канвасе или в списке слоёв</small>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="statusbar">
+    <span class="muted" id="labelSubtitle">40×30 мм · 320×240</span>
+    <span class="spacer"></span>
+    <span id="wsBadge" class="badge muted-badge">Web Bluetooth: ?</span>
+    <span id="printStatus" class="muted"></span>
+    <div class="progress"><div id="progressBar"></div></div>
+  </footer>
+</div>
+
+<!-- ================================================== МОДАЛКИ -->
+<div id="settingsModal" class="modal hidden">
+  <div class="modal-box">
+    <h3 data-i18n="print_settings">Настройки печати</h3>
+    <label class="field"><span data-i18n="device_profile">Профиль устройства</span>
+      <select id="selProtocol">
+        <option value="auto" selected data-i18n="profile_auto">Авто (по имени устройства)</option>
+        <option value="l">L-series (P11/P12/P15/P7/M1/A50/LP…)</option>
+        <option value="p50">P50/S2/T2/X2/M50/M60/L100/U210…</option>
+        <option value="escpos">ESC/POS</option>
+      </select></label>
+    <label class="field"><span data-i18n="print_direction">Направление печати</span>
+      <select id="selDirection">
+        <option value="auto" selected data-i18n="dir_auto">Авто (по модели)</option>
+        <option value="2" data-i18n="dir_2">↑ — без поворота (0°)</option>
+        <option value="0" data-i18n="dir_0">← — поворот 90° по часовой</option>
+        <option value="1" data-i18n="dir_1">→ — поворот 90° против часовой</option>
+        <option value="3" data-i18n="dir_3">↓ — поворот 180°</option>
+      </select></label>
+    <label class="field"><span data-i18n="paper_type">Тип бумаги</span>
+      <select id="selPaperType">
+        <option value="3" selected data-i18n="paper_3">Наклейка с промежутком (gap)</option>
+        <option value="1" data-i18n="paper_1">Непрерывная лента</option>
+        <option value="2" data-i18n="paper_2">Чёрная метка</option>
+      </select></label>
+    <label class="field"><span data-i18n="render_quality">Чёткость отрисовки</span>
+      <select id="selRender">
+        <option value="sharp" selected data-i18n="render_sharp">Чёткий текст (суперсэмплинг + порог)</option>
+        <option value="photo" data-i18n="render_photo">Полутона (Floyd–Steinberg, для фото)</option>
+      </select></label>
+    <label class="field"><span data-i18n="density">Плотность (контраст)</span>
+      <input type="range" id="rngDensity" min="0" max="2" value="1">
+      <em id="densityLabel" data-i18n="density_1">1 — норма</em></label>
+    <label class="field"><span data-i18n="copies">Копий</span>
+      <input type="number" id="numCopies" min="1" max="50" value="1"></label>
+    <label class="field"><span data-i18n="feed">Прогон после печати, точек (лента)</span>
+      <input type="number" id="numFeed" min="0" max="600" value="100"></label>
+    <label class="field check"><input type="checkbox" id="chkCompressed">
+      <span data-i18n="compressed">Сжатый растр 0x1F10+zlib (переопределяет тип бумаги)</span></label>
+    <div class="row">
+      <button class="btn primary" data-close data-i18n="done">Готово</button>
+    </div>
+  </div>
+</div>
+
+<div id="paperModal" class="modal hidden">
+  <div class="modal-box">
+    <h3 data-i18n="label">Наклейка</h3>
+    <label class="field"><span data-i18n="size_preset">Размер (пресет)</span>
+      <select id="selPaperPreset">
+        <optgroup label="Standard" data-i18n-label="std">
+          <option value="40x30" selected data-i18n="paper_40x30">40 × 30 мм</option>
+          <option value="50x30" data-i18n="paper_50x30">50 × 30 мм</option>
+          <option value="30x20" data-i18n="paper_30x20">30 × 20 мм</option>
+          <option value="45x30" data-i18n="paper_45x30">45 × 30 мм</option>
+          <option value="58x40" data-i18n="paper_58x40">58 × 40 мм (58 мм принтер)</option>
+          <option value="60x40" data-i18n="paper_60x40">60 × 40 мм</option>
+          <option value="70x40" data-i18n="paper_70x40">70 × 40 мм</option>
+          <option value="80x50" data-i18n="paper_80x50">80 × 50 мм</option>
+          <option value="100x50" data-i18n="paper_100x50">100 × 50 мм</option>
+        </optgroup>
+        <optgroup label="Narrow" data-i18n-label="narrow">
+          <option value="12x40" data-i18n="paper_12x40">12 × 40 мм</option>
+          <option value="12x60" data-i18n="paper_12x60">12 × 60 мм</option>
+          <option value="15x50" data-i18n="paper_15x50">15 × 50 мм</option>
+          <option value="15x100" data-i18n="paper_15x100">15 × 100 мм</option>
+          <option value="20x40" data-i18n="paper_20x40">20 × 40 мм</option>
+          <option value="20x50" data-i18n="paper_20x50">20 × 50 мм</option>
+          <option value="20x80" data-i18n="paper_20x80">20 × 80 мм</option>
+          <option value="25x50" data-i18n="paper_25x50">25 × 50 мм</option>
+          <option value="25x100" data-i18n="paper_25x100">25 × 100 мм</option>
+        </optgroup>
+        <optgroup label="Long" data-i18n-label="long">
+          <option value="30x60" data-i18n="paper_30x60">30 × 60 мм</option>
+          <option value="30x70" data-i18n="paper_30x70">30 × 70 мм</option>
+          <option value="30x120" data-i18n="paper_30x120">30 × 120 мм</option>
+          <option value="40x60" data-i18n="paper_40x60">40 × 60 мм</option>
+          <option value="40x80" data-i18n="paper_40x80">40 × 80 мм</option>
+          <option value="40x130" data-i18n="paper_40x130">40 × 130 мм</option>
+          <option value="40x150" data-i18n="paper_40x150">40 × 150 мм</option>
+          <option value="40x300" data-i18n="paper_40x300">40 × 300 мм</option>
+          <option value="50x80" data-i18n="paper_50x80">50 × 80 мм</option>
+          <option value="50x100" data-i18n="paper_50x100">50 × 100 мм</option>
+          <option value="50x150" data-i18n="paper_50x150">50 × 150 мм</option>
+          <option value="60x80" data-i18n="paper_60x80">60 × 80 мм</option>
+          <option value="60x120" data-i18n="paper_60x120">60 × 120 мм</option>
+          <option value="60x300" data-i18n="paper_60x300">60 × 300 мм</option>
+          <option value="100x100" data-i18n="paper_100x100">100 × 100 мм</option>
+          <option value="100x150" data-i18n="paper_100x150">100 × 150 мм</option>
+        </optgroup>
+        <optgroup label="Square" data-i18n-label="square">
+          <option value="40x40" data-i18n="paper_40x40">40 × 40 мм</option>
+          <option value="50x50" data-i18n="paper_50x50">50 × 50 мм</option>
+          <option value="60x60" data-i18n="paper_60x60">60 × 60 мм</option>
+        </optgroup>
+        <optgroup label="Round" data-i18n-label="round">
+          <option value="30x30" data-i18n="paper_d30">⌀ 30 мм</option>
+          <option value="40x40r" data-i18n="paper_d40">⌀ 40 мм</option>
+          <option value="50x50r" data-i18n="paper_d50">⌀ 50 мм</option>
+        </optgroup>
+        <option value="custom" data-i18n="custom">Свой размер…</option>
+      </select></label>
+    <div class="row">
+      <label class="field half"><span data-i18n="width_mm">Ширина, мм</span>
+        <input type="number" id="numLabelW" min="10" max="110" value="40"></label>
+      <label class="field half"><span data-i18n="height_mm">Высота, мм</span>
+        <input type="number" id="numLabelH" min="5" max="300" value="30"></label>
+    </div>
+    <div class="row">
+      <button class="btn primary" data-close data-i18n="done">Готово</button>
+    </div>
+  </div>
+</div>
+
+<div id="previewModal" class="modal hidden">
+  <div class="modal-box preview-box">
+    <h3><span data-i18n="preview_title">Предпросмотр печати</span> <span class="muted small" id="previewInfo"></span></h3>
+    <div class="preview-scroll-dark">
+      <canvas id="previewCanvas"></canvas>
+    </div>
+    <div class="row">
+      <button class="btn" data-close data-i18n="close">Закрыть</button>
+      <button class="btn primary" id="btnPrint2" data-i18n="print">Печать</button>
+    </div>
+  </div>
+</div>
+
+<div id="logModal" class="modal hidden">
+  <div class="modal-box wide-box">
+    <h3 data-i18n="log_title">Журнал</h3>
+    <div id="log" class="log"></div>
+    <div class="row"><button class="btn" data-close data-i18n="close">Закрыть</button></div>
+  </div>
+</div>
+
+<div id="connectModal" class="modal hidden">
+  <div class="modal-box">
+    <h3 data-i18n="connect_printer">Подключение принтера</h3>
+    <p class="muted small" data-i18n="connect_hint">Выберите способ поиска BLE-устройств.</p>
+    <button class="btn primary" data-mode="name"><span data-i18n="by_name">По имени принтера</span> <em data-i18n="recommended">(рекомендуется)</em></button>
+    <button class="btn" data-mode="service" data-i18n="by_service">По BLE-сервису (0xFF00 / 49535343 / 0xFD00)</button>
+    <button class="btn" data-mode="all" data-i18n="all_devices">Показать все BLE-устройства</button>
+    <button class="btn" data-close data-i18n="cancel">Отмена</button>
+    <div class="hint">
+      <b data-i18n="connect_troubleshooting">Если принтер не виден или не подключается:</b>
+      <ul>
+        <li data-i18n="ts1">Отключите принтер от телефона — принтер держит только одно соединение.</li>
+        <li data-i18n="ts2">Выключите и включите принтер.</li>
+        <li data-i18n="ts3">Страница должна быть открыта по https:// или http://localhost в Chrome/Edge.</li>
+        <li data-i18n="ts4">Если принтер спарен в Windows — удалите устройство в настройках Bluetooth.</li>
+        <li data-i18n="ts5">Модели только с Bluetooth Classic (SPP: D100/D200/S8) браузером не подключаются.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div id="templatesModal" class="modal hidden">
+  <div class="modal-box wide-box">
+    <h3 data-i18n="templates">Шаблоны</h3>
+
+    <!-- сохранить текущий -->
+    <div class="tpl-save-row">
+      <input type="text" id="tplNameInput" data-i18n-ph="template_name_ph" placeholder="Например: Ценник 40×30">
+      <button class="btn primary" id="btnTplSave" data-i18n="save_as_template">Сохранить как шаблон</button>
+    </div>
+
+    <!-- список -->
+    <div id="tplList" class="tpl-list"></div>
+
+    <!-- импорт/экспорт -->
+    <div class="row tpl-actions">
+      <button class="btn" id="btnTplImport" data-i18n="import_template">Импорт</button>
+      <button class="btn" id="btnTplExportAll" data-i18n="export_all">Экспорт всех</button>
+      <button class="btn" data-close data-i18n="close">Закрыть</button>
+    </div>
+    <p class="muted small" id="tplHint">.amlbl</p>
+  </div>
+</div>
+
+<div id="deviceModal" class="modal hidden">
+  <div class="modal-box">
+    <h3><span data-i18n="device_info">Об устройстве</span> <span class="muted small" id="devName"></span></h3>
+
+    <div class="dev-grid">
+      <div class="dev-item">
+        <span class="dev-label" data-i18n="battery">Заряд батареи</span>
+        <span class="dev-value" id="devBattery"><span class="muted">—</span></span>
+        <div class="battery-bar"><div id="devBatteryBar"></div></div>
+      </div>
+      <div class="dev-item">
+        <span class="dev-label" data-i18n="paper_remain">Остаток бумаги</span>
+        <span class="dev-value" id="devPaper"><span class="muted">—</span></span>
+        <div class="battery-bar paper"><div id="devPaperBar"></div></div>
+      </div>
+      <div class="dev-item">
+        <span class="dev-label" data-i18n="firmware">Версия прошивки</span>
+        <span class="dev-value mono" id="devVersion"><span class="muted">—</span></span>
+      </div>
+      <div class="dev-item">
+        <span class="dev-label" data-i18n="serial_number">Серийный номер</span>
+        <span class="dev-value mono" id="devSN"><span class="muted">—</span></span>
+      </div>
+      <div class="dev-item wide">
+        <span class="dev-label" data-i18n="mac_address">MAC-адрес</span>
+        <span class="dev-value mono" id="devMAC"><span class="muted">—</span></span>
+      </div>
+      <div class="dev-item">
+        <span class="dev-label" data-i18n="printer">Статус</span>
+        <span class="dev-value" id="devStatus"><span class="muted">—</span></span>
+      </div>
+      <div class="dev-item">
+        <span class="dev-label" data-i18n="shutdown_time">Автоотключение</span>
+        <div class="shut-row">
+          <input type="number" id="devShutInput" min="1" max="120" value="15">
+          <span class="muted small" data-i18n="shutdown_min">мин</span>
+          <button class="btn sm" id="btnSetShut" data-i18n="shutdown_set">Установить</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="btn primary" id="btnDevRefresh" data-i18n="refresh">Обновить</button>
+      <button class="btn" data-close data-i18n="close">Закрыть</button>
+    </div>
+
+    <!-- сервисные операции -->
+    <h4 class="dev-section" data-i18n="service">Сервис</h4>
+    <div class="svc-grid">
+      <button class="btn sm" id="svcCalibrate" data-i18n="calibrate">Калибровка</button>
+      <button class="btn sm" id="svcLearnGap" data-i18n="learn_gap">Калибровка gap</button>
+      <button class="btn sm" id="svcBeep" data-i18n="beep">Звуковой сигнал</button>
+      <button class="btn sm" id="svcScreen" data-i18n="screen">Экран</button>
+      <button class="btn sm" id="svcSyncTime" data-i18n="sync_time">Синхр. времени</button>
+      <button class="btn sm" id="svcFeedMark" data-i18n="feed_to_mark">Прогон до метки</button>
+      <button class="btn sm" id="svcInduction" data-i18n="induction">Индукция</button>
+      <button class="btn sm danger" id="svcFactoryReset" data-i18n="factory_reset">Сброс настроек</button>
+    </div>
+
+    <!-- BT-консоль: произвольные hex-команды -->
+    <h4 class="dev-section"><span data-i18n="bt_console">BT-консоль</span> <span class="muted small">hex</span></h4>
+    <div class="console-row">
+      <input type="text" id="hexInput" data-i18n-ph="hex_cmd_ph" placeholder="hex-команда: 10 FF 3D" spellcheck="false">
+      <button class="btn sm" id="btnHexSend" data-i18n="send">Отправить</button>
+    </div>
+    <div class="console-presets">
+      <button class="btn xs" data-hex="10 FF 3D">status</button>
+      <button class="btn xs" data-hex="10 FF 50 F1">battery</button>
+      <button class="btn xs" data-hex="10 FF 20 F1">version</button>
+      <button class="btn xs" data-hex="10 FF 20 F2">SN</button>
+      <button class="btn xs" data-hex="10 FF 20 F3">MAC</button>
+      <button class="btn xs" data-hex="1A 1F 06">mileage</button>
+      <button class="btn xs" data-hex="1F 60 00">speed</button>
+      <button class="btn xs" data-hex="1F 70 00">density</button>
+      <button class="btn xs" data-hex="10 FF 13">shut time</button>
+      <button class="btn xs" data-hex="10 FF BB 02">time</button>
+      <button class="btn xs" data-hex="1B 3D 5D A5">prepare X8</button>
+      <button class="btn xs" data-hex="07">beep</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept="image/*" hidden>
+<input type="file" id="tplFileInput" accept=".amlbl,.json,application/json" hidden>
+
+<script src="vendor/pako.min.js"></script>
+<script src="vendor/qrcode.min.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ablemark.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/templates.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
