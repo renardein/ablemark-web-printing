@@ -320,27 +320,32 @@ const AM = (() => {
       id: 'l', title: 'L-серия (P11/P12/P15/P7/M1/S15/A1/LP…)',
       match: /^(P11|P12|P15|P7R?|P1S|S15|S12|M1|A1|LP15|LP90|LPC74|YEW12|Silvertec|BARABOGO|iSPACE)/i,
       protocol: 'l', direction: 1, dpi: 8, paper: [40, 30], paperType: 3,
+      packetSize: 95, packetDelayMs: 30,
     },
     {
       id: 'p50', title: 'P50/S2/T2/M50/M57/X2/M60/ET-Z/Jammuk',
       match: /^(P50|P5OS|PS50|P50S|T2|M50|M57|S2|Jammuk|ET-Z|X2|M60|X8|D210)/i,
       protocol: 'p50', direction: 2, dpi: 8, paper: [50, 30], paperType: 2,
+      packetSize: 95, packetDelayMs: 30,
     },
     {
       id: 'p80', title: 'P80/P80S/T3',
       match: /^(P80S?|T3)/i,
       protocol: 'l', direction: 2, dpi: 8, paper: [40, 30], paperType: 3,
+      packetSize: 237, packetDelayMs: 30,
     },
     {
       id: 'd100', title: 'D100/D200/X4/L100',
       match: /^(D100|D200|X4|L100|U210)/i,
       protocol: 'p50', direction: 3, dpi: 8, paper: [40, 30], paperType: 2,
+      packetSize: 237, packetDelayMs: 30,
     },
   ];
 
   const DEFAULT_PROFILE = {
     id: 'default', title: 'неизвестная модель', protocol: 'l', direction: 2,
     dpi: 8, paper: [40, 30], paperType: 3,
+    packetSize: 237, packetDelayMs: 30,
   };
 
   /** Профиль модели по имени устройства. */
@@ -349,9 +354,14 @@ const AM = (() => {
     for (const m of MODELS) {
       if (m.match.test(name)) {
         const p = { ...m };
-        // S2 Pro / X2 Pro — 11.8 dot/mm
-        if (/^(S2|X2).*pro/i.test(name)) p.dpi = 11.8;
+        // S2 Pro / X2 Pro — 11.8 dot/mm; таймер передачи 10 мс для S2 Pro, 1 мс для X2/M60
+        if (/^(S2|X2).*pro/i.test(name)) { p.dpi = 11.8; }
+        if (/^S2.*pro/i.test(name)) p.packetDelayMs = 10;
+        if (/^(X2|M60)/i.test(name)) p.packetDelayMs = 1;
         if (/D210H/i.test(name)) p.dpi = 12;
+        // жёсткие лимиты пакета из оригинального BluetoothPort.write():
+        // P11/P12/LP90 → 90 байт (остальная L-серия и S2-семейство уже 95)
+        if (/^(P11|P12|LP90)/i.test(name)) p.packetSize = 90;
         return p;
       }
     }
@@ -463,6 +473,8 @@ const AM = (() => {
       this.ctrlChar = null;
       this.serviceKind = null; // 'A' | 'B' | 'C' | 'GEN'
       this.packetSize = 20;    // безопасный старт; уточняется по MTU-нотификации
+      this._packetCap = null;  // аппаратный лимит пакета модели (из профиля)
+      this._packetDelayMs = 30; // пауза между пакетами (pacing, как в оригинале)
       this.credit = 0;
       this.creditMode = false;
       this.connected = false;
@@ -471,6 +483,21 @@ const AM = (() => {
       this._creditsWaiters = [];
       this._sending = false;
       this._creditTimeouts = 0;
+    }
+
+    /**
+     * Применить профиль модели: аппаратный лимит размера пакета (каппинг MTU)
+     * и межпакетную задержку. Большой BLE MTU не значит, что буфер принтера
+     * переварит большие записи — оригинальное приложение жёстко ограничивает
+     * пакет по модели (P11/P12/LP90=90, P15-семейство/S2=95, прочие=237).
+     */
+    setModelProfile(profile) {
+      if (!profile) return;
+      this._packetCap = profile.packetSize || null;
+      this._packetDelayMs = profile.packetDelayMs != null ? profile.packetDelayMs : 30;
+      if (this._packetCap && this.packetSize > this._packetCap) {
+        this.packetSize = this._packetCap;
+      }
     }
 
     onRx(fn) { this._rxListeners.push(fn); }
@@ -603,7 +630,13 @@ const AM = (() => {
     _onCtrl(v) {
       if (v.length === 3 && v[0] === 0x02) {
         const mtu = (v[2] << 8) | v[1];
-        this.packetSize = Math.max(20, Math.min(244, mtu - 3));
+        // пакет = MTU−3, но не выше аппаратного лимита модели
+        let size = Math.max(20, Math.min(244, mtu - 3));
+        if (this._packetCap && size > this._packetCap) {
+          this.log(`Контроль: MTU=${mtu} → пакет ${size}, ограничен до ${this._packetCap} (лимит модели)`);
+          size = this._packetCap;
+        }
+        this.packetSize = size;
         this.log(`Контроль: MTU=${mtu}, пакет=${this.packetSize}`);
       } else if (v.length === 2 && v[0] === 0x01) {
         this.creditMode = true;

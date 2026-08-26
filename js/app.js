@@ -176,7 +176,9 @@
 
   function applyModelProfile(name) {
     profile = AM.modelProfile(name);
-    log(t('profile_log', { t: profile.title, p: profile.protocol, d: dirText(profile.direction), dpi: profile.dpi }), 'ok');
+    port.setModelProfile(profile); // аппаратный лимит пакета + межпакетная задержка
+    log(t('profile_log', { t: profile.title, p: profile.protocol, d: dirText(profile.direction), dpi: profile.dpi }) +
+        ` · packet≤${profile.packetSize}B/${profile.packetDelayMs}ms`, 'ok');
     setPaperSize(profile.paper[0], profile.paper[1], profile.dpi, false);
   }
 

@@ -225,6 +225,25 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   ok('profile D100: направление 3', d100.direction === 3);
   const unknown = AM.modelProfile('SomeOther');
   ok('profile unknown: дефолт направление 2', unknown.direction === 2);
+
+  // каппинг пакета и задержки по моделям (из BluetoothPort.write оригинала)
+  ok('packet P15 = 95', p15.packetSize === 95 && p15.packetDelayMs === 30);
+  const p11 = AM.modelProfile('P11_123');
+  ok('packet P11 = 90', p11.packetSize === 90);
+  const p12 = AM.modelProfile('P12_x');
+  ok('packet P12 = 90', p12.packetSize === 90);
+  const lp90 = AM.modelProfile('LP90');
+  ok('packet LP90 = 90', lp90.packetSize === 90);
+  ok('packet S2 = 95', s2.packetSize === 95);
+  ok('packet S2 pro = 10ms pacing', s2pro.packetDelayMs === 10 && s2pro.packetSize === 95);
+  const x2 = AM.modelProfile('X2 Pro');
+  ok('packet X2 Pro = 1ms pacing', x2.packetDelayMs === 1);
+  const m60 = AM.modelProfile('M60');
+  ok('packet M60 = 1ms pacing', m60.packetDelayMs === 1);
+  const p80 = AM.modelProfile('P80');
+  ok('packet P80 = 237', p80.packetSize === 237);
+  ok('packet D100 = 237', d100.packetSize === 237);
+  ok('packet unknown = 237', unknown.packetSize === 237);
 }
 
 // --- buildPrintStream: paperType ---
