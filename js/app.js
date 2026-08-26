@@ -230,6 +230,7 @@
         renderLayers();
       });
       item.querySelector('.l-vis').addEventListener('click', () => {
+        pushHistory();
         el.hidden = !el.hidden;
         renderAll();
         renderLayers();
@@ -241,7 +242,54 @@
   // unified refresh: канвас + слои
   const refreshAll = () => { renderAll(); renderLayers(); };
 
-  Editor.attachCanvas(els.editorCanvas, () => { renderAll(); renderLayers(); });
+  // ------------------------------------------------------ undo/redo ---
+  // Снапшоты Editor.serialize(): изображения не сериализуются (как в шаблонах) —
+  // откат через их добавление теряет картинки сессии.
+  const MAX_HISTORY = 50;
+  const history = { past: [], future: [], burstTimer: null };
+
+  const snapshot = () => Editor.serialize();
+
+  function pushHistory() {
+    history.past.push(snapshot());
+    if (history.past.length > MAX_HISTORY) history.past.shift();
+    history.future.length = 0;
+  }
+
+  /** Захват «пачкой»: первый ввод серии фиксирует состояние ДО изменения. */
+  function beginHistoryBurst() {
+    if (history.burstTimer == null) pushHistory();
+    clearTimeout(history.burstTimer);
+    history.burstTimer = setTimeout(() => { history.burstTimer = null; }, 800);
+  }
+
+  function syncPaperInputs() {
+    els.numLabelW.value = Editor.state.labelWmm;
+    els.numLabelH.value = Editor.state.labelHmm;
+    const key = `${Editor.state.labelWmm}x${Editor.state.labelHmm}`;
+    const opts = Array.from(els.selPaperPreset.options).filter(o => o.value.replace(/r$/, '') === key);
+    els.selPaperPreset.value = opts.length ? opts[0].value : 'custom';
+  }
+
+  function undo() {
+    if (!history.past.length) return false;
+    history.future.push(snapshot());
+    Editor.deserialize(history.past.pop());
+    syncPaperInputs();
+    refreshAll();
+    return true;
+  }
+
+  function redo() {
+    if (!history.future.length) return false;
+    history.past.push(snapshot());
+    Editor.deserialize(history.future.pop());
+    syncPaperInputs();
+    refreshAll();
+    return true;
+  }
+
+  Editor.attachCanvas(els.editorCanvas, () => { renderAll(); renderLayers(); }, () => pushHistory());
 
   const ro = new ResizeObserver(() => renderAll());
   ro.observe(els.canvasWrap);
@@ -295,6 +343,7 @@
 
       if (type === 'clear') {
         if (Editor.state.elements.length && confirm(t('confirm_clear'))) {
+          pushHistory();
           Editor.state.elements = [];
           Editor.state.selected = null;
           refreshAll();
@@ -304,6 +353,7 @@
       }
 
       if (type === 'wifi' || type === 'vcard' || type === 'url') {
+        pushHistory();
         Editor.add(type);
         refreshAll();
         return;
@@ -317,6 +367,7 @@
           reader.onload = () => {
             const img = new Image();
             img.onload = () => {
+              pushHistory();
               Editor.add('image', { img, src: reader.result, w: Math.min(Editor.widthDots(), Math.round(Editor.widthDots() * 0.8)) });
               refreshAll();
             };
@@ -329,6 +380,7 @@
         return;
       }
 
+      pushHistory();
       Editor.add(type);
       refreshAll();
     });
@@ -338,6 +390,7 @@
   function deleteSelected() {
     const sel = Editor.state.selected;
     if (!sel) return;
+    pushHistory();
     const i = Editor.state.elements.indexOf(sel);
     if (i >= 0) Editor.state.elements.splice(i, 1);
     Editor.state.selected = null;
@@ -347,6 +400,7 @@
   function duplicateSelected() {
     const sel = Editor.state.selected;
     if (!sel) return null;
+    pushHistory();
     const copy = JSON.parse(JSON.stringify({ ...sel, img: undefined }));
     copy.id = Date.now();
     copy.x += 10; copy.y += 10;
@@ -370,6 +424,7 @@
 
   function clipboardPaste() {
     if (!clipboard) return;
+    pushHistory();
     const pasted = JSON.parse(JSON.stringify(clipboard));
     pasted.id = Date.now();
     pasted.x += 12; pasted.y += 12;
@@ -382,12 +437,13 @@
 
   $('#toolDel').addEventListener('click', deleteSelected);
   $('#toolCopy').addEventListener('click', duplicateSelected);
-  $('#toolBigger').addEventListener('click', () => { Editor.nudgeScale(1.15); refreshAll(); });
-  $('#toolSmaller').addEventListener('click', () => { Editor.nudgeScale(0.87); refreshAll(); });
+  $('#toolBigger').addEventListener('click', () => { beginHistoryBurst(); Editor.nudgeScale(1.15); refreshAll(); });
+  $('#toolSmaller').addEventListener('click', () => { beginHistoryBurst(); Editor.nudgeScale(0.87); refreshAll(); });
 
   $('#toolRotate').addEventListener('click', () => {
     const sel = Editor.state.selected;
     if (!sel) return;
+    beginHistoryBurst();
     sel.rotation = ((sel.rotation || 0) + 90) % 360;
     refreshAll();
   });
@@ -395,6 +451,7 @@
   $('#toolLayerUp').addEventListener('click', () => {
     const sel = Editor.state.selected;
     if (!sel) return;
+    beginHistoryBurst();
     const arr = Editor.state.elements;
     const i = arr.indexOf(sel);
     if (i < arr.length - 1) { arr.splice(i, 1); arr.splice(i + 1, 0, sel); }
@@ -413,6 +470,7 @@
   let alignIdx = 0;
   $('#toolAlign').addEventListener('click', () => {
     if (!Editor.state.selected) return;
+    beginHistoryBurst();
     const kind = ALIGN_CYCLE[alignIdx % ALIGN_CYCLE.length];
     Editor.align(kind);
     log(t('align_log', { t: t('aligned.' + kind) }));
@@ -421,6 +479,7 @@
   });
 
   $('#btnRotateAll').addEventListener('click', () => {
+    pushHistory();
     const w = Editor.state.labelWmm, h = Editor.state.labelHmm;
     Editor.setPaper(h, w, null, null);
     els.numLabelW.value = h; els.numLabelH.value = w;
@@ -483,6 +542,7 @@
       const out = document.createElement('output');
       out.textContent = fmt ? fmt(val) : val;
       inp.addEventListener('input', () => {
+        beginHistoryBurst();
         cb(parseInt(inp.value, 10));
         out.textContent = fmt ? fmt(inp.value) : inp.value;
         refreshAll();
@@ -498,6 +558,7 @@
         b.textContent = label;
         if (String(v) === String(value)) b.classList.add('on');
         b.addEventListener('click', () => {
+          beginHistoryBurst();
           cb(v);
           refreshAll();
         });
@@ -508,14 +569,14 @@
     const numField = (val, min, max, cb) => {
       const inp = document.createElement('input');
       inp.type = 'number'; inp.min = min; inp.max = max; inp.value = val;
-      inp.addEventListener('input', () => { cb(parseInt(inp.value, 10) || min); refreshAll(); });
+      inp.addEventListener('input', () => { beginHistoryBurst(); cb(parseInt(inp.value, 10) || min); refreshAll(); });
       return inp;
     };
     const textField = (val, cb, multiline) => {
       const inp = document.createElement(multiline ? 'textarea' : 'input');
       if (!multiline) inp.type = 'text';
       inp.value = val;
-      inp.addEventListener('input', () => { cb(inp.value); refreshAll(); });
+      inp.addEventListener('input', () => { beginHistoryBurst(); cb(inp.value); refreshAll(); });
       return inp;
     };
     const change = () => refreshAll();
@@ -664,6 +725,18 @@
       if (sel) { duplicateSelected(); e.preventDefault(); }
       return;
     }
+    // undo / redo (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y; ЙЦУКЕН: я/н)
+    if (ctrl && (e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я')) {
+      if (e.shiftKey) { if (redo()) log(t('redo_log')); }
+      else if (undo()) log(t('undo_log'));
+      e.preventDefault();
+      return;
+    }
+    if (ctrl && (e.key === 'y' || e.key === 'Y' || e.key === 'н' || e.key === 'Н')) {
+      if (redo()) log(t('redo_log'));
+      e.preventDefault();
+      return;
+    }
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (sel) { deleteSelected(); e.preventDefault(); }
@@ -694,6 +767,7 @@
       case 'ArrowDown':  sel.y += step; moved = true; break;
     }
     if (moved) {
+      beginHistoryBurst();
       const m = Editor.measure(sel);
       sel.x = Math.max(-m.w, Math.min(Editor.widthDots(), sel.x));
       sel.y = Math.max(-m.h, Math.min(Editor.heightDots(), sel.y));
@@ -709,10 +783,11 @@
     if (ctrl && e.key === 'ArrowUp') { $('#toolLayerUp').click(); e.preventDefault(); return; }
     if (ctrl && e.key === 'ArrowDown') { $('#toolLayerDown').click(); e.preventDefault(); return; }
 
-    if (e.key === '+' || e.key === '=') { Editor.nudgeScale(1.15); refreshAll(); e.preventDefault(); return; }
-    if (e.key === '-') { Editor.nudgeScale(0.87); refreshAll(); e.preventDefault(); return; }
+    if (e.key === '+' || e.key === '=') { beginHistoryBurst(); Editor.nudgeScale(1.15); refreshAll(); e.preventDefault(); return; }
+    if (e.key === '-') { beginHistoryBurst(); Editor.nudgeScale(0.87); refreshAll(); e.preventDefault(); return; }
 
     if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
+      beginHistoryBurst();
       sel.rotation = ((sel.rotation || 0) + 90) % 360;
       refreshAll();
       e.preventDefault();
@@ -1095,6 +1170,7 @@
       btnUse.className = 'btn';
       btnUse.textContent = t('use_template');
       btnUse.addEventListener('click', () => {
+        pushHistory();
         Editor.deserialize(tpl.data);
         Editor.state.selected = null;
         els.numLabelW.value = Editor.state.labelWmm;
@@ -1182,9 +1258,9 @@
   $('#btnLoad').addEventListener('click', () => {
     const s = localStorage.getItem('ablemark.label');
     if (!s) { log(t('no_saved'), 'warn'); return; }
+    pushHistory();
     Editor.deserialize(s);
-    els.numLabelW.value = Editor.state.labelWmm;
-    els.numLabelH.value = Editor.state.labelHmm;
+    syncPaperInputs();
     refreshAll();
     log(t('label_loaded'), 'ok');
   });
@@ -1225,5 +1301,5 @@
   log('AbleMark V1.4.1 reverse-engineered · PROTOCOL.md');
 
   // отладочный хук для тестов
-  window.__am = { renderAll, refreshAll, renderLayers, refreshProps, doPrint, buildMonoFor, openProps: refreshProps, port, queryDeviceInfo };
+  window.__am = { renderAll, refreshAll, renderLayers, refreshProps, doPrint, buildMonoFor, openProps: refreshProps, port, queryDeviceInfo, undo, redo, pushHistory };
 })();

@@ -430,6 +430,38 @@ const path = require('path');
     document.getElementById('deviceModal').classList.add('hidden');
   });
 
+  // 16) undo/redo (Ctrl+Z / Ctrl+Y)
+  {
+    const n0 = await page.evaluate(() => Editor.state.elements.length);
+    await page.click('[data-add="text"]');
+    await new Promise(r => setTimeout(r, 250));
+    const n1 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyZ'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 250));
+    const n2 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyY'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 250));
+    const n3 = await page.evaluate(() => Editor.state.elements.length);
+    console.log(`undo/redo: ${n0} → add ${n1} → undo ${n2} → redo ${n3}`);
+    if (n1 !== n0 + 1) errors.push('undo: элемент не добавился');
+    if (n2 !== n0) errors.push(`undo не откатил добавление: ${n2} вместо ${n0}`);
+    if (n3 !== n0 + 1) errors.push(`redo не вернул элемент: ${n3} вместо ${n0 + 1}`);
+    // откат удаления (после redo выделение сброшено — выбираем элемент)
+    await page.evaluate(() => {
+      Editor.state.selected = Editor.state.elements[Editor.state.elements.length - 1];
+      window.__am.refreshAll();
+    });
+    await page.keyboard.press('Delete');
+    await new Promise(r => setTimeout(r, 200));
+    const n4 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyZ'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 250));
+    const n5 = await page.evaluate(() => Editor.state.elements.length);
+    console.log(`undo удаления: delete ${n4} → undo ${n5}`);
+    if (n4 !== n0) errors.push('undo: удаление не сработало');
+    if (n5 !== n0 + 1) errors.push(`undo не вернул удалённый элемент: ${n5}`);
+  }
+
   await page.screenshot({ path: path.join(__dirname, 'screenshot.png') });
 
   console.log(errors.length ? ('ОШИБКИ:\n' + errors.join('\n')) : 'SMOKE-TEST OK');

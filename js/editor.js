@@ -669,7 +669,7 @@ const Editor = (() => {
   }
 
   /** Подключить события мыши/тача к канвасу редактора. */
-  function attachCanvas(canvas, onChange) {
+  function attachCanvas(canvas, onChange, onCommit) {
     if (canvas._amAttached) return;
     canvas._amAttached = true;
 
@@ -744,8 +744,10 @@ const Editor = (() => {
     };
 
     const up = () => {
+      const mutated = !!(interaction && (interaction.moved || interaction.mode === 'scale' || interaction.mode === 'rotate'));
       interaction = null;
       onChange && onChange();
+      if (mutated && onCommit) onCommit();
     };
 
     canvas.addEventListener('mousedown', down);
