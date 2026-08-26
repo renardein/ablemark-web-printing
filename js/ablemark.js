@@ -713,11 +713,13 @@ const AM = (() => {
     }
 
     async _writeOnce(chunk) {
-      const useResponse = this.writeChar.properties.write;
+      // оригинал ставит TX в WRITE_NO_RESPONSE (setWriteType(1));
+      // с pacing + кредитами это надёжнее — не ждём ACK BLE-стека на каждый пакет
+      const canNoResp = this.writeChar.properties.writeWithoutResponse;
       for (let t = 0; t < 4; t++) {
         try {
-          if (useResponse) await this.writeChar.writeValueWithResponse(chunk);
-          else await this.writeChar.writeValueWithoutResponse(chunk);
+          if (canNoResp) await this.writeChar.writeValueWithoutResponse(chunk);
+          else await this.writeChar.writeValueWithResponse(chunk);
           return;
         } catch (e) {
           const m = String(e && e.message || e);
