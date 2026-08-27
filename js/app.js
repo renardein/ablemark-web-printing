@@ -27,6 +27,7 @@
     logModal: $('#logModal'),
     connectModal: $('#connectModal'),
     templatesModal: $('#templatesModal'),
+    paletteModal: $('#paletteModal'),
     deviceModal: $('#deviceModal'),
     tplList: $('#tplList'),
     tplNameInput: $('#tplNameInput'),
@@ -89,9 +90,9 @@
   }
 
   function handlePrinterReply(v) {
-    if (v.length === 2 && v[0] === 0xff) {
-      const s = { 1: t('status_no_paper'), 2: t('status_cover_open'), 3: t('status_overheat'), 4: t('status_low_bat'), 5: t('status_cover_closed') }[v[1]];
-      if (s) log(`${t('printer')}: ${s}`, v[1] === 5 ? 'ok' : 'warn');
+    if (v.length >= 2 && v[0] === 0xff) {
+      const key = AM.Parsers.status(v);
+      if (key) log(`${t('printer')}: ${t('status_' + key)}`, key === 'cover_closed' ? 'ok' : 'warn');
       return;
     }
     const printable = Array.from(v, b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '').join('');
@@ -175,7 +176,9 @@
 
   function applyModelProfile(name) {
     profile = AM.modelProfile(name);
-    log(t('profile_log', { t: profile.title, p: profile.protocol, d: dirText(profile.direction), dpi: profile.dpi }), 'ok');
+    port.setModelProfile(profile); // аппаратный лимит пакета + межпакетная задержка
+    log(t('profile_log', { t: profile.title, p: profile.protocol, d: dirText(profile.direction), dpi: profile.dpi }) +
+        ` · packet≤${profile.packetSize}B/${profile.packetDelayMs}ms`, 'ok');
     setPaperSize(profile.paper[0], profile.paper[1], profile.dpi, false);
   }
 
@@ -230,6 +233,7 @@
         renderLayers();
       });
       item.querySelector('.l-vis').addEventListener('click', () => {
+        pushHistory();
         el.hidden = !el.hidden;
         renderAll();
         renderLayers();
@@ -241,7 +245,54 @@
   // unified refresh: канвас + слои
   const refreshAll = () => { renderAll(); renderLayers(); };
 
-  Editor.attachCanvas(els.editorCanvas, () => { renderAll(); renderLayers(); });
+  // ------------------------------------------------------ undo/redo ---
+  // Снапшоты Editor.serialize(): изображения не сериализуются (как в шаблонах) —
+  // откат через их добавление теряет картинки сессии.
+  const MAX_HISTORY = 50;
+  const history = { past: [], future: [], burstTimer: null };
+
+  const snapshot = () => Editor.serialize();
+
+  function pushHistory() {
+    history.past.push(snapshot());
+    if (history.past.length > MAX_HISTORY) history.past.shift();
+    history.future.length = 0;
+  }
+
+  /** Захват «пачкой»: первый ввод серии фиксирует состояние ДО изменения. */
+  function beginHistoryBurst() {
+    if (history.burstTimer == null) pushHistory();
+    clearTimeout(history.burstTimer);
+    history.burstTimer = setTimeout(() => { history.burstTimer = null; }, 800);
+  }
+
+  function syncPaperInputs() {
+    els.numLabelW.value = Editor.state.labelWmm;
+    els.numLabelH.value = Editor.state.labelHmm;
+    const key = `${Editor.state.labelWmm}x${Editor.state.labelHmm}`;
+    const opts = Array.from(els.selPaperPreset.options).filter(o => o.value.replace(/r$/, '') === key);
+    els.selPaperPreset.value = opts.length ? opts[0].value : 'custom';
+  }
+
+  function undo() {
+    if (!history.past.length) return false;
+    history.future.push(snapshot());
+    Editor.deserialize(history.past.pop());
+    syncPaperInputs();
+    refreshAll();
+    return true;
+  }
+
+  function redo() {
+    if (!history.future.length) return false;
+    history.past.push(snapshot());
+    Editor.deserialize(history.future.pop());
+    syncPaperInputs();
+    refreshAll();
+    return true;
+  }
+
+  Editor.attachCanvas(els.editorCanvas, () => { renderAll(); renderLayers(); }, () => pushHistory());
 
   const ro = new ResizeObserver(() => renderAll());
   ro.observe(els.canvasWrap);
@@ -289,55 +340,61 @@
   });
 
   // ------------------------------------------------------ добавление ---
-  $$('[data-add]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const type = btn.dataset.add;
-
-      if (type === 'clear') {
-        if (Editor.state.elements.length && confirm(t('confirm_clear'))) {
-          Editor.state.elements = [];
-          Editor.state.selected = null;
-          refreshAll();
-          log(t('layout_cleared'));
-        }
-        return;
-      }
-
-      if (type === 'wifi' || type === 'vcard' || type === 'url') {
-        Editor.add(type);
+  /** Добавить элемент типа type (общий путь для кнопок и quick-add клавиш). */
+  function addElement(type) {
+    if (type === 'clear') {
+      if (Editor.state.elements.length && confirm(t('confirm_clear'))) {
+        pushHistory();
+        Editor.state.elements = [];
+        Editor.state.selected = null;
         refreshAll();
-        return;
+        log(t('layout_cleared'));
       }
+      return;
+    }
 
-      if (type === 'image') {
-        els.fileInput.onchange = () => {
-          const file = els.fileInput.files[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => {
-            const img = new Image();
-            img.onload = () => {
-              Editor.add('image', { img, src: reader.result, w: Math.min(Editor.widthDots(), Math.round(Editor.widthDots() * 0.8)) });
-              refreshAll();
-            };
-            img.src = reader.result;
-          };
-          reader.readAsDataURL(file);
-          els.fileInput.value = '';
-        };
-        els.fileInput.click();
-        return;
-      }
-
+    if (type === 'wifi' || type === 'vcard' || type === 'url') {
+      pushHistory();
       Editor.add(type);
       refreshAll();
-    });
+      return;
+    }
+
+    if (type === 'image') {
+      els.fileInput.onchange = () => {
+        const file = els.fileInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            pushHistory();
+            Editor.add('image', { img, src: reader.result, w: Math.min(Editor.widthDots(), Math.round(Editor.widthDots() * 0.8)) });
+            refreshAll();
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+        els.fileInput.value = '';
+      };
+      els.fileInput.click();
+      return;
+    }
+
+    pushHistory();
+    Editor.add(type);
+    refreshAll();
+  }
+
+  $$('[data-add]').forEach(btn => {
+    btn.addEventListener('click', () => addElement(btn.dataset.add));
   });
 
   // ------------------------------------------------------ тулбар ---
   function deleteSelected() {
     const sel = Editor.state.selected;
     if (!sel) return;
+    pushHistory();
     const i = Editor.state.elements.indexOf(sel);
     if (i >= 0) Editor.state.elements.splice(i, 1);
     Editor.state.selected = null;
@@ -347,6 +404,7 @@
   function duplicateSelected() {
     const sel = Editor.state.selected;
     if (!sel) return null;
+    pushHistory();
     const copy = JSON.parse(JSON.stringify({ ...sel, img: undefined }));
     copy.id = Date.now();
     copy.x += 10; copy.y += 10;
@@ -370,6 +428,7 @@
 
   function clipboardPaste() {
     if (!clipboard) return;
+    pushHistory();
     const pasted = JSON.parse(JSON.stringify(clipboard));
     pasted.id = Date.now();
     pasted.x += 12; pasted.y += 12;
@@ -382,12 +441,13 @@
 
   $('#toolDel').addEventListener('click', deleteSelected);
   $('#toolCopy').addEventListener('click', duplicateSelected);
-  $('#toolBigger').addEventListener('click', () => { Editor.nudgeScale(1.15); refreshAll(); });
-  $('#toolSmaller').addEventListener('click', () => { Editor.nudgeScale(0.87); refreshAll(); });
+  $('#toolBigger').addEventListener('click', () => { beginHistoryBurst(); Editor.nudgeScale(1.15); refreshAll(); });
+  $('#toolSmaller').addEventListener('click', () => { beginHistoryBurst(); Editor.nudgeScale(0.87); refreshAll(); });
 
   $('#toolRotate').addEventListener('click', () => {
     const sel = Editor.state.selected;
     if (!sel) return;
+    beginHistoryBurst();
     sel.rotation = ((sel.rotation || 0) + 90) % 360;
     refreshAll();
   });
@@ -395,6 +455,7 @@
   $('#toolLayerUp').addEventListener('click', () => {
     const sel = Editor.state.selected;
     if (!sel) return;
+    beginHistoryBurst();
     const arr = Editor.state.elements;
     const i = arr.indexOf(sel);
     if (i < arr.length - 1) { arr.splice(i, 1); arr.splice(i + 1, 0, sel); }
@@ -413,6 +474,7 @@
   let alignIdx = 0;
   $('#toolAlign').addEventListener('click', () => {
     if (!Editor.state.selected) return;
+    beginHistoryBurst();
     const kind = ALIGN_CYCLE[alignIdx % ALIGN_CYCLE.length];
     Editor.align(kind);
     log(t('align_log', { t: t('aligned.' + kind) }));
@@ -421,6 +483,7 @@
   });
 
   $('#btnRotateAll').addEventListener('click', () => {
+    pushHistory();
     const w = Editor.state.labelWmm, h = Editor.state.labelHmm;
     Editor.setPaper(h, w, null, null);
     els.numLabelW.value = h; els.numLabelH.value = w;
@@ -483,6 +546,7 @@
       const out = document.createElement('output');
       out.textContent = fmt ? fmt(val) : val;
       inp.addEventListener('input', () => {
+        beginHistoryBurst();
         cb(parseInt(inp.value, 10));
         out.textContent = fmt ? fmt(inp.value) : inp.value;
         refreshAll();
@@ -498,6 +562,7 @@
         b.textContent = label;
         if (String(v) === String(value)) b.classList.add('on');
         b.addEventListener('click', () => {
+          beginHistoryBurst();
           cb(v);
           refreshAll();
         });
@@ -508,14 +573,14 @@
     const numField = (val, min, max, cb) => {
       const inp = document.createElement('input');
       inp.type = 'number'; inp.min = min; inp.max = max; inp.value = val;
-      inp.addEventListener('input', () => { cb(parseInt(inp.value, 10) || min); refreshAll(); });
+      inp.addEventListener('input', () => { beginHistoryBurst(); cb(parseInt(inp.value, 10) || min); refreshAll(); });
       return inp;
     };
     const textField = (val, cb, multiline) => {
       const inp = document.createElement(multiline ? 'textarea' : 'input');
       if (!multiline) inp.type = 'text';
       inp.value = val;
-      inp.addEventListener('input', () => { cb(inp.value); refreshAll(); });
+      inp.addEventListener('input', () => { beginHistoryBurst(); cb(inp.value); refreshAll(); });
       return inp;
     };
     const change = () => refreshAll();
@@ -631,6 +696,112 @@
     row('Y', numField(el.y, -500, 500, v => el.y = v));
   }
 
+  // ------------------------------------------------------ command palette (Ctrl+K) ---
+  const paletteInput = $('#paletteInput');
+  const paletteList = $('#paletteList');
+  let paletteSelIdx = 0;
+  let paletteFlat = []; // отфильтрованные команды текущего просмотра
+
+  const paletteCommands = () => ([
+    { group: 'add', ico: 'T',  key: 'cmd_add_text', hint: 'T', act: () => addElement('text') },
+    { group: 'add', ico: '▣',  key: 'cmd_add_qr', hint: 'Q', act: () => addElement('qr') },
+    { group: 'add', ico: '|||', key: 'cmd_add_barcode', hint: 'B', act: () => addElement('barcode') },
+    { group: 'add', ico: '🖼', key: 'cmd_add_image', hint: 'I', act: () => addElement('image') },
+    { group: 'add', ico: '🕐', key: 'cmd_add_date', hint: '', act: () => addElement('date') },
+    { group: 'add', ico: '#',  key: 'cmd_add_serial', hint: '', act: () => addElement('serial') },
+    { group: 'add', ico: '─',  key: 'cmd_add_line', hint: 'L', act: () => addElement('line') },
+    { group: 'add', ico: '▭',  key: 'cmd_add_shape', hint: 'S', act: () => addElement('shape') },
+    { group: 'add', ico: '▦',  key: 'cmd_add_table', hint: '', act: () => addElement('table') },
+    { group: 'add', ico: '₽',  key: 'cmd_add_price', hint: '', act: () => addElement('price') },
+    { group: 'add', ico: '📶', key: 'cmd_add_wifi', hint: '', act: () => addElement('wifi') },
+    { group: 'add', ico: '👤', key: 'cmd_add_vcard', hint: '', act: () => addElement('vcard') },
+    { group: 'add', ico: '🔗', key: 'cmd_add_url', hint: '', act: () => addElement('url') },
+    { group: 'file', ico: '↶', key: 'cmd_undo', hint: 'Ctrl+Z', act: () => { if (undo()) log(t('undo_log')); } },
+    { group: 'file', ico: '↷', key: 'cmd_redo', hint: 'Ctrl+Y', act: () => { if (redo()) log(t('redo_log')); } },
+    { group: 'file', ico: '🖨', key: 'cmd_print', hint: 'Ctrl+P', act: () => doPrint() },
+    { group: 'file', ico: '👁', key: 'cmd_preview', hint: '', act: () => $('#btnPreview').click() },
+    { group: 'file', ico: '💾', key: 'cmd_save_label', hint: 'Ctrl+S', act: () => $('#btnSave').click() },
+    { group: 'file', ico: '🗂', key: 'cmd_templates', hint: '', act: () => { renderTplList(); openModal(els.templatesModal); } },
+    { group: 'file', ico: '✕',  key: 'cmd_clear', hint: '', act: () => addElement('clear') },
+    { group: 'view', ico: '▦',  key: 'cmd_grid', hint: 'G', act: () => { Editor.state.showGrid = !Editor.state.showGrid; renderAll(); } },
+    { group: 'view', ico: '⤢',  key: 'cmd_fit', hint: '1', act: () => applyZoom(1) },
+    { group: 'view', ico: '🌐', key: 'cmd_lang', hint: '', act: () => $('#btnLang').click() },
+    { group: 'device', ico: 'ℹ', key: 'cmd_device_info', hint: '', act: () => $('#btnDeviceInfo').click() },
+    { group: 'device', ico: '⚙', key: 'cmd_settings', hint: '', act: () => openModal(els.settingsModal) },
+    { group: 'device', ico: '📜', key: 'cmd_journal', hint: '', act: () => openModal(els.logModal) },
+  ]);
+
+  const GROUP_ORDER = ['add', 'file', 'view', 'device'];
+
+  /** Подборка: подстрока или подпоследовательность в названии. */
+  function paletteMatch(cmd, query) {
+    const name = t(cmd.key).toLowerCase();
+    if (name.includes(query)) return true;
+    let qi = 0;
+    for (const ch of name) { if (qi < query.length && ch === query[qi]) qi++; }
+    return qi === query.length;
+  }
+
+  function renderPalette(query) {
+    const q = String(query || '').trim().toLowerCase();
+    const cmds = paletteCommands().filter(c => !q || paletteMatch(c, q));
+    paletteFlat = cmds;
+    paletteSelIdx = Math.min(paletteSelIdx, Math.max(0, cmds.length - 1));
+    paletteList.innerHTML = '';
+    if (!cmds.length) {
+      const empty = document.createElement('div');
+      empty.className = 'palette-empty';
+      empty.textContent = t('palette_empty');
+      paletteList.appendChild(empty);
+      return;
+    }
+    let lastGroup = null;
+    cmds.forEach((c, i) => {
+      if (c.group !== lastGroup) {
+        lastGroup = c.group;
+        const g = document.createElement('div');
+        g.className = 'palette-group';
+        g.textContent = t('cmd_group_' + c.group);
+        paletteList.appendChild(g);
+      }
+      const item = document.createElement('div');
+      item.className = 'palette-item' + (i === paletteSelIdx ? ' sel' : '');
+      item.innerHTML = `<span class="p-ico">${c.ico}</span><span class="p-name">${escapeHtml(t(c.key))}</span>` +
+        (c.hint ? `<span class="p-kbd">${c.hint}</span>` : '');
+      item.addEventListener('click', () => { execPalette(c); });
+      paletteList.appendChild(item);
+    });
+  }
+
+  function execPalette(cmd) {
+    closeModal(els.paletteModal);
+    try { cmd.act(); } catch (err) { log(`${t('error')}: ${err.message}`, 'err'); }
+  }
+
+  function openPalette() {
+    paletteInput.value = '';
+    paletteSelIdx = 0;
+    renderPalette('');
+    openModal(els.paletteModal);
+    setTimeout(() => paletteInput.focus(), 50);
+  }
+
+  paletteInput.addEventListener('input', () => { paletteSelIdx = 0; renderPalette(paletteInput.value); });
+  paletteInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      paletteSelIdx = Math.min(paletteSelIdx + 1, paletteFlat.length - 1);
+      renderPalette(paletteInput.value);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      paletteSelIdx = Math.max(paletteSelIdx - 1, 0);
+      renderPalette(paletteInput.value);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (paletteFlat[paletteSelIdx]) execPalette(paletteFlat[paletteSelIdx]);
+    }
+  });
+
   // ------------------------------------------------------ горячие клавиши ---
   let lastArrowTs = 0;
 
@@ -641,6 +812,13 @@
     if (e.key === 'Escape') {
       const open = $$('.modal').filter(m => !m.classList.contains('hidden'))[0];
       if (open) { open.classList.add('hidden'); e.preventDefault(); }
+      return;
+    }
+    const ctrlEarly = e.ctrlKey || e.metaKey;
+    if (ctrlEarly && (e.key === 'k' || e.key === 'K' || e.key === 'л' || e.key === 'Л')) {
+      e.preventDefault();
+      if (!els.paletteModal.classList.contains('hidden')) closeModal(els.paletteModal);
+      else openPalette();
       return;
     }
     if (isTypingTarget(e.target)) return;
@@ -664,6 +842,29 @@
       if (sel) { duplicateSelected(); e.preventDefault(); }
       return;
     }
+    // undo / redo (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y; ЙЦУКЕН: я/н)
+    if (ctrl && (e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я')) {
+      if (e.shiftKey) { if (redo()) log(t('redo_log')); }
+      else if (undo()) log(t('undo_log'));
+      e.preventDefault();
+      return;
+    }
+    if (ctrl && (e.key === 'y' || e.key === 'Y' || e.key === 'н' || e.key === 'Н')) {
+      if (redo()) log(t('redo_log'));
+      e.preventDefault();
+      return;
+    }
+    // Ctrl+P — печать (откроет подключение, если принтера нет), Ctrl+S — сохранить
+    if (ctrl && (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З')) {
+      e.preventDefault();
+      doPrint();
+      return;
+    }
+    if (ctrl && (e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы')) {
+      e.preventDefault();
+      $('#btnSave').click();
+      return;
+    }
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (sel) { deleteSelected(); e.preventDefault(); }
@@ -682,6 +883,37 @@
       return;
     }
 
+    // quick-add и утилиты (одиночные клавиши, без модификаторов;
+    // R занята поворотом — фигура на S)
+    if (!ctrl && !e.altKey) {
+      const k = e.key.toLowerCase();
+      const quick = { t: 'text', q: 'qr', b: 'barcode', i: 'image', l: 'line', s: 'shape' }[k];
+      if (quick) {
+        if (e.repeat) { e.preventDefault(); return; }
+        addElement(quick);
+        e.preventDefault();
+        return;
+      }
+      if (k === 'g') {
+        Editor.state.showGrid = !Editor.state.showGrid;
+        renderAll();
+        log(Editor.state.showGrid ? t('grid_on') : t('grid_off'));
+        e.preventDefault();
+        return;
+      }
+      if (k === 'v') {
+        Editor.state.selected = null;
+        refreshAll();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === '1') {
+        applyZoom(1);
+        e.preventDefault();
+        return;
+      }
+    }
+
     if (!sel) return;
 
     const step = e.shiftKey ? 10 : 1;
@@ -694,6 +926,7 @@
       case 'ArrowDown':  sel.y += step; moved = true; break;
     }
     if (moved) {
+      beginHistoryBurst();
       const m = Editor.measure(sel);
       sel.x = Math.max(-m.w, Math.min(Editor.widthDots(), sel.x));
       sel.y = Math.max(-m.h, Math.min(Editor.heightDots(), sel.y));
@@ -709,10 +942,11 @@
     if (ctrl && e.key === 'ArrowUp') { $('#toolLayerUp').click(); e.preventDefault(); return; }
     if (ctrl && e.key === 'ArrowDown') { $('#toolLayerDown').click(); e.preventDefault(); return; }
 
-    if (e.key === '+' || e.key === '=') { Editor.nudgeScale(1.15); refreshAll(); e.preventDefault(); return; }
-    if (e.key === '-') { Editor.nudgeScale(0.87); refreshAll(); e.preventDefault(); return; }
+    if (e.key === '+' || e.key === '=') { beginHistoryBurst(); Editor.nudgeScale(1.15); refreshAll(); e.preventDefault(); return; }
+    if (e.key === '-') { beginHistoryBurst(); Editor.nudgeScale(0.87); refreshAll(); e.preventDefault(); return; }
 
     if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
+      beginHistoryBurst();
       sel.rotation = ((sel.rotation || 0) + 90) % 360;
       refreshAll();
       e.preventDefault();
@@ -770,19 +1004,19 @@
       } catch (_) { noReply++; return null; }
     };
 
-    // статус
-    const st = await step(AM.CMD.queryStatus(), (v) => AM.Parsers.status(v));
-    if (st != null) {
-      const stTxt = st === 0 ? t('status_ok')
-        : st === 1 ? '⏳ print'
-        : st === 2 ? t('status_cover_open')
-        : st === 3 ? t('status_no_paper')
-        : st === 4 ? t('status_low_bat')
-        : st === 5 ? t('status_overheat')
-        : '?';
-      setVal(devEls.status, st === 0 ? `<span class="ok">${stTxt}</span>` : `<span class="crit">${stTxt}</span>`);
+    // статус (10 FF 40 → [FF, код]; fallback — детальный 1F 20 00 с флагами)
+    const stKey = await step(AM.CMD.queryStatus(), (v) => AM.Parsers.status(v));
+    if (stKey != null) {
+      const isOk = stKey === 'ok' || stKey === 'cover_closed';
+      setVal(devEls.status, `<span class="${isOk ? 'ok' : 'crit'}">${t('status_' + stKey)}</span>`);
     } else {
-      setVal(devEls.status, `<span class="muted">${t('no_reply')}</span>`);
+      const detKey = await step(AM.CMD.queryDetailedStatus(), (v) => AM.Parsers.status(v));
+      if (detKey != null) {
+        const isOk = detKey === 'ok' || detKey === 'cover_closed';
+        setVal(devEls.status, `<span class="${isOk ? 'ok' : 'crit'}">${t('status_' + detKey)}</span>`);
+      } else {
+        setVal(devEls.status, `<span class="muted">${t('no_reply')}</span>`);
+      }
     }
 
     // батарея
@@ -899,6 +1133,8 @@
   });
   $('#svcFeedMark').addEventListener('click', () => sendSvc(AM.CMD.feedToBlackMark(), t('feed_to_mark')));
   $('#svcInduction').addEventListener('click', () => sendSvc(AM.CMD.inductionPrint(), t('induction')));
+  $('#svcSelfCheck').addEventListener('click', () => sendSvc(AM.CMD.selfCheck(), t('self_check_done'), 8000));
+  $('#svcBackoff').addEventListener('click', () => sendSvc(AM.CMD.backoff(), t('backoff_done')));
   $('#svcFactoryReset').addEventListener('click', async () => {
     if (!confirm(t('factory_reset_confirm'))) return;
     await sendSvc(AM.CMD.factoryReset(), t('factory_reset_done'), 5000);
@@ -978,6 +1214,7 @@
     const direction = effectiveDirection();
     const opts = {
       protocol: selectedProtocol(),
+      profile, // для команды плотности конкретной модели
       density: parseInt(els.rngDensity.value, 10),
       copies: Math.max(1, parseInt(els.numCopies.value, 10) || 1),
       paperType: parseInt(els.selPaperType.value, 10),
@@ -999,18 +1236,27 @@
         if (!mono.height) { log(t('empty_label'), 'warn'); return; }
         const rotated = AM.rotate1bpp(mono, direction);
         const copyOpts = incremental ? { ...opts, copies: 1 } : opts;
-        const stream = AM.buildPrintStream(rotated, copyOpts);
-        totalBytes += stream.length;
+        // preamble/bulk: setup отдельно, затем пауза на пополнение кредитов,
+        // затем растр непрерывным потоком (как Printer.printBitmap в thermoprint)
+        const parts = AM.buildPrintParts(rotated, copyOpts)[0];
+        totalBytes += parts.preamble.length + parts.bulk.length;
 
         log(t('print_log', {
           w: Editor.state.labelWmm, h: Editor.state.labelHmm,
           sw: mono.srcWidth, sh: mono.srcHeight, sc: mono.scale,
           d: dirText(direction), rw: rotated.bpr * 8, rh: rotated.height,
-          p: opts.protocol, n: stream.length,
+          p: opts.protocol, n: parts.preamble.length + parts.bulk.length,
         }) + (incremental ? ' · ' + t('copy_log', { i: copy + 1, n: opts.copies }) +
               (serialEl ? ' · ' + Editor.applySequence(serialEl, copy).text : '') : ''));
         if (copy > 0) await AM.sleep(300);
-        await port.write(stream, (pct) => {
+        if (parts.preamble.length) {
+          await port.write(parts.preamble, (pct) => {
+            els.btnPrint.textContent = `${t('sending')} ${pct}%`;
+          });
+          // даём принтеру обработать setup и вернуть кредиты — растр пойдёт без «дыр»
+          await port.waitForCredits(3, 1000);
+        }
+        await port.write(parts.bulk, (pct) => {
           els.btnPrint.textContent = incremental
             ? `${t('copy_log', { i: copy + 1, n: opts.copies })} · ${pct}%`
             : `${t('sending')} ${pct}%`;
@@ -1022,21 +1268,26 @@
       log(t('sent_bytes', { n: totalBytes }), 'ok');
 
       const reply = await new Promise((resolve) => {
+        // разрыв после отправки всех данных = неявный успех:
+        // принтер отпечатал и выключился (как waitForPrintResult в thermoprint)
+        const offDisc = port.onceDisconnect(() => { resolve({ implicit: true }); });
         const timer = setTimeout(() => {
           const i = port._rxListeners.indexOf(fn);
           if (i >= 0) port._rxListeners.splice(i, 1);
+          offDisc();
           resolve(null);
         }, 5000);
         const fn = (v) => {
           clearTimeout(timer);
+          offDisc();
           const i = port._rxListeners.indexOf(fn);
           if (i >= 0) port._rxListeners.splice(i, 1);
           resolve(v);
         };
         port._rxListeners.push(fn);
       });
-      if (reply && (reply[0] === 0xaa || reply[0] === 0x4f || reply[0] === 0x4b)) {
-        log(t('ack_ok'), 'ok');
+      if (reply && (reply.implicit || reply[0] === 0xaa || reply[0] === 0x4f || reply[0] === 0x4b)) {
+        log(reply.implicit ? t('ack_implicit') : t('ack_ok'), 'ok');
         els.btnPrint.textContent = t('done_ok');
         els.printStatus.textContent = t('done_ok');
       } else {
@@ -1095,6 +1346,7 @@
       btnUse.className = 'btn';
       btnUse.textContent = t('use_template');
       btnUse.addEventListener('click', () => {
+        pushHistory();
         Editor.deserialize(tpl.data);
         Editor.state.selected = null;
         els.numLabelW.value = Editor.state.labelWmm;
@@ -1182,9 +1434,9 @@
   $('#btnLoad').addEventListener('click', () => {
     const s = localStorage.getItem('ablemark.label');
     if (!s) { log(t('no_saved'), 'warn'); return; }
+    pushHistory();
     Editor.deserialize(s);
-    els.numLabelW.value = Editor.state.labelWmm;
-    els.numLabelH.value = Editor.state.labelHmm;
+    syncPaperInputs();
     refreshAll();
     log(t('label_loaded'), 'ok');
   });
@@ -1225,5 +1477,5 @@
   log('AbleMark V1.4.1 reverse-engineered · PROTOCOL.md');
 
   // отладочный хук для тестов
-  window.__am = { renderAll, refreshAll, renderLayers, refreshProps, doPrint, buildMonoFor, openProps: refreshProps, port, queryDeviceInfo };
+  window.__am = { renderAll, refreshAll, renderLayers, refreshProps, doPrint, buildMonoFor, openProps: refreshProps, port, queryDeviceInfo, undo, redo, pushHistory };
 })();

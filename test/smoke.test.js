@@ -284,7 +284,7 @@ const path = require('path');
     AM.AbleMarkPort.prototype.command = async function (bytes) {
       await this.write(bytes).catch(() => {});
       const h = AM.hex(bytes).replace(/\s+/g, ' ');
-      if (h.startsWith('10 ff 3d')) return window.__devMock.status;
+      if (h.startsWith('10 ff 40')) return window.__devMock.status;
       if (h.startsWith('10 ff 50')) return window.__devMock.battery;
       if (h.startsWith('10 ff 20 f1')) return window.__devMock.version;
       if (h.startsWith('10 ff 20 f2')) return window.__devMock.sn;
@@ -400,12 +400,12 @@ const path = require('path');
   // пресет-кнопка
   await page.evaluate(() => { window.__sentHex = []; });
   await page.evaluate(() => {
-    document.querySelector('[data-hex="10 FF 3D"]').click();
+    document.querySelector('[data-hex="10 FF 40"]').click();
   });
   await new Promise(r => setTimeout(r, 300));
   hexSent = await page.evaluate(() => window.__sentHex[0]);
   console.log('preset sent:', hexSent);
-  if (hexSent !== '10 ff 3d') errors.push('пресет консоли: ' + hexSent);
+  if (hexSent !== '10 ff 40') errors.push('пресет консоли: ' + hexSent);
 
   // слитный hex
   await page.evaluate(() => { window.__sentHex = []; document.getElementById('hexInput').value = ''; });
@@ -429,6 +429,116 @@ const path = require('path');
     window.__am.port.connected = false;
     document.getElementById('deviceModal').classList.add('hidden');
   });
+
+  // 16) undo/redo (Ctrl+Z / Ctrl+Y)
+  {
+    const n0 = await page.evaluate(() => Editor.state.elements.length);
+    await page.click('[data-add="text"]');
+    await new Promise(r => setTimeout(r, 250));
+    const n1 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyZ'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 250));
+    const n2 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyY'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 250));
+    const n3 = await page.evaluate(() => Editor.state.elements.length);
+    console.log(`undo/redo: ${n0} → add ${n1} → undo ${n2} → redo ${n3}`);
+    if (n1 !== n0 + 1) errors.push('undo: элемент не добавился');
+    if (n2 !== n0) errors.push(`undo не откатил добавление: ${n2} вместо ${n0}`);
+    if (n3 !== n0 + 1) errors.push(`redo не вернул элемент: ${n3} вместо ${n0 + 1}`);
+    // откат удаления (после redo выделение сброшено — выбираем элемент)
+    await page.evaluate(() => {
+      Editor.state.selected = Editor.state.elements[Editor.state.elements.length - 1];
+      window.__am.refreshAll();
+    });
+    await page.keyboard.press('Delete');
+    await new Promise(r => setTimeout(r, 200));
+    const n4 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyZ'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 250));
+    const n5 = await page.evaluate(() => Editor.state.elements.length);
+    console.log(`undo удаления: delete ${n4} → undo ${n5}`);
+    if (n4 !== n0) errors.push('undo: удаление не сработало');
+    if (n5 !== n0 + 1) errors.push(`undo не вернул удалённый элемент: ${n5}`);
+  }
+
+  // 17) quick-add клавиши + сетка
+  {
+    const n0 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.press('KeyT');
+    await new Promise(r => setTimeout(r, 200));
+    const n1 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.press('KeyQ');
+    await new Promise(r => setTimeout(r, 200));
+    const n2 = await page.evaluate(() => Editor.state.elements.length);
+    const hasQr = await page.evaluate(() => Editor.state.elements.some(e => e.type === 'qr'));
+    console.log(`quick-add: ${n0} → T ${n1} → Q ${n2} (qr: ${hasQr})`);
+    if (n1 !== n0 + 1 || n2 !== n0 + 2) errors.push('quick-add T/Q не работает');
+    if (!hasQr) errors.push('quick-add Q не добавил QR');
+
+    // сетка: G включает/выключает (проверяем состояние + перерисовку)
+    await page.keyboard.press('KeyG');
+    await new Promise(r => setTimeout(r, 200));
+    const gridOn = await page.evaluate(() => Editor.state.showGrid);
+    await page.keyboard.press('KeyG');
+    await new Promise(r => setTimeout(r, 200));
+    const gridOff = await page.evaluate(() => Editor.state.showGrid);
+    console.log('сетка G:', gridOn, '→', gridOff);
+    if (gridOn !== true || gridOff !== false) errors.push('переключение сетки (G) не работает');
+
+    // V снимает выделение
+    await page.keyboard.press('KeyV');
+    await new Promise(r => setTimeout(r, 150));
+    const selNull = await page.evaluate(() => Editor.state.selected === null);
+    if (!selNull) errors.push('V не снимает выделение');
+
+    // Ctrl+P без принтера открывает окно подключения; Ctrl+S сохраняет макет
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyP'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 300));
+    const connectOpen = await page.evaluate(() => !document.getElementById('connectModal').classList.contains('hidden'));
+    await page.keyboard.press('Escape');
+    await new Promise(r => setTimeout(r, 150));
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyS'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 200));
+    const saved = await page.evaluate(() => {
+      const s = localStorage.getItem('ablemark.label');
+      return s ? JSON.parse(s).elements.length : -1;
+    });
+    console.log('Ctrl+P открыл подключение:', connectOpen, '· Ctrl+S сохранил элементов:', saved);
+    if (!connectOpen) errors.push('Ctrl+P не открыл окно подключения');
+    if (saved < 3) errors.push('Ctrl+S не сохранил макет: ' + saved);
+  }
+
+  // 18) command palette (Ctrl+K)
+  {
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyK'); await page.keyboard.up('Control');
+    await new Promise(r => setTimeout(r, 300));
+    const open = await page.evaluate(() => !document.getElementById('paletteModal').classList.contains('hidden'));
+    const itemCount = await page.evaluate(() => document.querySelectorAll('#paletteList .palette-item').length);
+    const hasPrint = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('#paletteList .palette-item .p-name')).some(e => /Печать|Print/.test(e.textContent)));
+    console.log('palette open:', open, '· команд:', itemCount, '· печать есть:', hasPrint);
+    if (!open) errors.push('Ctrl+K не открыл палитру');
+    if (itemCount < 20) errors.push('в палитре мало команд: ' + itemCount);
+    if (!hasPrint) errors.push('в палитре нет команды печати');
+
+    // фильтрация
+    await page.type('#paletteInput', 'qr');
+    await new Promise(r => setTimeout(r, 250));
+    const filtered = await page.evaluate(() => document.querySelectorAll('#paletteList .palette-item').length);
+    console.log('фильтр «qr»:', filtered, 'команд');
+    if (filtered < 1 || filtered >= itemCount) errors.push('фильтрация палитры не работает: ' + filtered);
+
+    // Enter исполняет первую отфильтрованную команду (добавляет QR)
+    const n0 = await page.evaluate(() => Editor.state.elements.length);
+    await page.keyboard.press('Enter');
+    await new Promise(r => setTimeout(r, 300));
+    const n1 = await page.evaluate(() => Editor.state.elements.length);
+    const closed = await page.evaluate(() => document.getElementById('paletteModal').classList.contains('hidden'));
+    console.log('palette Enter: элементов', n0, '→', n1, '· закрыта:', closed);
+    if (n1 !== n0 + 1) errors.push('palette Enter не добавил QR');
+    if (!closed) errors.push('palette не закрылась после Enter');
+  }
 
   await page.screenshot({ path: path.join(__dirname, 'screenshot.png') });
 

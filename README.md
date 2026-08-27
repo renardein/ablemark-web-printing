@@ -136,6 +136,12 @@ Full protocol documentation: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and
 - Images/templates with embedded images aren't persisted between sessions (images are kept
   in memory only).
 
+## License
+
+MIT — see [LICENSE](LICENSE). Protocol implementation ideas partially borrowed from
+[thermoprint](https://github.com/tomLadder/thermoprint) by tomLadder (MIT); see the
+attribution section in the LICENSE file.
+
 ## Disclaimer
 
 This project is an independent clean-room-style reimplementation of the communication

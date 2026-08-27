@@ -39,7 +39,6 @@ eq('printerLocation(32,0)', AM.CMD.printerLocation(32, 0), [0x1f, 0x12, 0x20, 0x
 eq('setDensity(2,1)', AM.CMD.setDensity(2, 1), [0x1f, 0x70, 0x02, 0x01]);
 eq('feedDots(100)', AM.CMD.feedDots(100), [0x1b, 0x4a, 0x64]);
 eq('feedToMark', AM.CMD.feedToMark(), [0x1d, 0x0c]);
-eq('queryStatus', AM.CMD.queryStatus(), [0x10, 0xff, 0x3d]);
 eq('queryBattery', AM.CMD.queryBattery(), [0x10, 0xff, 0x50, 0xf1]);
 eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
 
@@ -226,6 +225,25 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   ok('profile D100: направление 3', d100.direction === 3);
   const unknown = AM.modelProfile('SomeOther');
   ok('profile unknown: дефолт направление 2', unknown.direction === 2);
+
+  // каппинг пакета и задержки по моделям (из BluetoothPort.write оригинала)
+  ok('packet P15 = 95', p15.packetSize === 95 && p15.packetDelayMs === 30);
+  const p11 = AM.modelProfile('P11_123');
+  ok('packet P11 = 90', p11.packetSize === 90);
+  const p12 = AM.modelProfile('P12_x');
+  ok('packet P12 = 90', p12.packetSize === 90);
+  const lp90 = AM.modelProfile('LP90');
+  ok('packet LP90 = 90', lp90.packetSize === 90);
+  ok('packet S2 = 95', s2.packetSize === 95);
+  ok('packet S2 pro = 10ms pacing', s2pro.packetDelayMs === 10 && s2pro.packetSize === 95);
+  const x2 = AM.modelProfile('X2 Pro');
+  ok('packet X2 Pro = 1ms pacing', x2.packetDelayMs === 1);
+  const m60 = AM.modelProfile('M60');
+  ok('packet M60 = 1ms pacing', m60.packetDelayMs === 1);
+  const p80 = AM.modelProfile('P80');
+  ok('packet P80 = 237', p80.packetSize === 237);
+  ok('packet D100 = 237', d100.packetSize === 237);
+  ok('packet unknown = 237', unknown.packetSize === 237);
 }
 
 // --- buildPrintStream: paperType ---
@@ -333,15 +351,27 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   const P = AM.Parsers;
   const num = (name, a, b) => ok(name, a === b); // eq не умеет числа
 
-  // статус (биты)
-  num('status: ok', P.status(new Uint8Array([0x00])), 0);
-  num('status: печать (бит 1)', P.status(new Uint8Array([0x01])), 1);
-  num('status: крышка (бит 2)', P.status(new Uint8Array([0x02])), 2);
-  num('status: нет бумаги (бит 4)', P.status(new Uint8Array([0x04])), 3);
-  num('status: перегрев (бит 16)', P.status(new Uint8Array([0x10])), 5);
-  num('status: батарея (бит 8)', P.status(new Uint8Array([0x08])), 4);
-  num('status: приоритет печати', P.status(new Uint8Array([0x1f])), 1);
-  num('status: null', P.status(null), null);
+  // статус: [FF, код] — ответ на 10 FF 40
+  num('status [FF,1] → no_paper', P.status(new Uint8Array([0xff, 0x01])), 'no_paper');
+  num('status [FF,2] → cover_open', P.status(new Uint8Array([0xff, 0x02])), 'cover_open');
+  num('status [FF,3] → overheat', P.status(new Uint8Array([0xff, 0x03])), 'overheat');
+  num('status [FF,4] → low_bat', P.status(new Uint8Array([0xff, 0x04])), 'low_bat');
+  num('status [FF,5] → cover_closed', P.status(new Uint8Array([0xff, 0x05])), 'cover_closed');
+  num('status [FF,9] → null (неизвестный код)', P.status(new Uint8Array([0xff, 0x09])), null);
+  // статус: битовые флаги — ответ на 1F 20 00
+  num('status flags 0x00 → ok', P.status(new Uint8Array([0x00])), 'ok');
+  num('status flags 0x01 → printing', P.status(new Uint8Array([0x01])), 'printing');
+  num('status flags 0x02 → cover_open', P.status(new Uint8Array([0x02])), 'cover_open');
+  num('status flags 0x04 → no_paper', P.status(new Uint8Array([0x04])), 'no_paper');
+  num('status flags 0x10 → overheat', P.status(new Uint8Array([0x10])), 'overheat');
+  num('status flags 0x08 → low_bat', P.status(new Uint8Array([0x08])), 'low_bat');
+  num('status flags 0x1f → printing (приоритет)', P.status(new Uint8Array([0x1f])), 'printing');
+  num('status null → null', P.status(null), null);
+  // STATUS-карта
+  num('STATUS map 1..5', !!(AM.STATUS[1] && AM.STATUS[2] && AM.STATUS[3] && AM.STATUS[4] && AM.STATUS[5]), true);
+  // команды
+  eq('queryStatus = 10 FF 40', AM.CMD.queryStatus(), [0x10, 0xff, 0x40]);
+  eq('queryDetailedStatus = 1F 20 00', AM.CMD.queryDetailedStatus(), [0x1f, 0x20, 0x00]);
 
   // батарея: bArr[1]
   num('battery: [.., 87]', P.battery(new Uint8Array([0x55, 87])), 87);
@@ -418,17 +448,80 @@ eq('queryVersion', AM.CMD.queryVersion(), [0x10, 0xff, 0x20, 0xf1]);
   eq('setPaperType(2,32)', AM.CMD.setPaperType(2, 32), [0x1f, 0x80, 0x02, 0x20]);
   eq('setThickness(5)', AM.CMD.setThickness(5), [0x10, 0xff, 0x10, 0x00, 0x05]);
   eq('feedRowsEsc(3)', AM.CMD.feedRowsEsc(3), [0x1b, 0x64, 0x03]);
+  eq('selfCheck', AM.CMD.selfCheck(), [0x1f, 0x40]);
+  eq('backoff', AM.CMD.backoff(), [0x10, 0xff, 0xf2]);
 
   // parseHex
-  ok('parseHex «10 FF 3D»', AM.parseHex('10 FF 3D'), [0x10, 0xff, 0x3d]);
-  ok('parseHex «10ff3d»', AM.parseHex('10ff3d'), [0x10, 0xff, 0x3d]);
-  ok('parseHex «0x10,0xff,0x3d»', AM.parseHex('0x10,0xff,0x3d'), [0x10, 0xff, 0x3d]);
+  eq('parseHex «10 FF 40»', AM.parseHex('10 FF 40'), [0x10, 0xff, 0x40]);
+  eq('parseHex «10ff3d»', AM.parseHex('10ff3d'), [0x10, 0xff, 0x3d]);
+  eq('parseHex «0x10,0xff,0x3d»', AM.parseHex('0x10,0xff,0x3d'), [0x10, 0xff, 0x3d]);
   ok('parseHex «1A 1F 06»', AM.parseHex('1A 1F 06'), [0x1a, 0x1f, 0x06]);
   ok('parseHex пусто → null', AM.parseHex('') === null);
   ok('parseHex мусор → null', AM.parseHex('zz qq') === null);
   ok('parseHex 0x → null', AM.parseHex('0xZZ') === null);
   ok('parseHex односимвольные', AM.parseHex('7'), [0x07]);
 }
+
+// --- buildPrintParts: preamble/bulk разрез ---
+{
+  const m = { data: new Uint8Array([0xf0, 0x00]), bpr: 1, height: 2 };
+  const img = AM.gsV0(m.data, 1, 2);
+
+  // l-протокол: preamble = [density, wakeup, enable], bulk = [растр, feed, stop]
+  {
+    const parts = AM.buildPrintParts(m, { protocol: 'l', density: 1, copies: 1, paperType: 1, feedDots: 100 });
+    ok('parts: одна пара', parts.length === 1);
+    const preambleOk = parts[0].preamble.length ===
+      AM.CMD.setDensity(2, 1).length + AM.CMD.wakeupL().length + AM.CMD.enableL().length;
+    ok('parts l: preamble = density+wakeup+enable', preambleOk);
+    const bulkExpect = AM.concat(img, AM.CMD.feedDots(100), AM.CMD.stopL());
+    eq('parts l: bulk = растр+feed+stop', parts[0].bulk, bulkExpect);
+    // конкатенация частей = старый buildPrintStream
+    eq('parts l: preamble+bulk = stream', AM.concat(parts[0].preamble, parts[0].bulk),
+      AM.buildPrintStream(m, { protocol: 'l', density: 1, copies: 1, paperType: 1, feedDots: 100 }));
+  }
+
+  // p50: preamble = [wakeup, density, start, adjust81], bulk = [сжатый растр, location, stop, adjust80]
+  {
+    const parts = AM.buildPrintParts(m, { protocol: 'p50', density: 2, copies: 1 });
+    const bulkExpect = AM.concat(
+      AM.compressedImage(m.data, 1, 2), AM.CMD.printerLocation(32, 0),
+      AM.CMD.stopJobP(), AM.CMD.adjustAuto(80));
+    eq('parts p50: bulk = zlib-растр+location+stop+adjust', parts[0].bulk, bulkExpect);
+    ok('parts p50: preamble содержит wakeup+start',
+      parts[0].preamble.length === AM.CMD.wakeupP().length + AM.CMD.setDensity(2, 2).length +
+      AM.CMD.startJobP().length + AM.CMD.adjustAuto(81).length);
+  }
+
+  // copies=3 → три пары
+  {
+    const parts = AM.buildPrintParts(m, { protocol: 'l', density: 1, copies: 3, paperType: 3 });
+    ok('parts: 3 копии = 3 пары', parts.length === 3 &&
+      parts.every(p => p.preamble.length === parts[0].preamble.length));
+  }
+}
+
+  // плотность: команда и байты по профилю модели
+  {
+    const p15 = AM.modelProfile('P15');
+    eq('density P15 (thickness) d=0', AM.densityCommandFor(p15, 0), [0x10, 0xff, 0x10, 0x00, 0x00]);
+    eq('density P15 (thickness) d=1', AM.densityCommandFor(p15, 1), [0x10, 0xff, 0x10, 0x00, 0x01]);
+    eq('density P15 (thickness) d=2', AM.densityCommandFor(p15, 2), [0x10, 0xff, 0x10, 0x00, 0x02]);
+    const p50 = AM.modelProfile('P50');
+    eq('density P50 (density) d=0 → 1F 70 02 02', AM.densityCommandFor(p50, 0), [0x1f, 0x70, 0x02, 0x02]);
+    eq('density P50 d=1 → 5', AM.densityCommandFor(p50, 1), [0x1f, 0x70, 0x02, 0x05]);
+    eq('density P50 d=2 → 15', AM.densityCommandFor(p50, 2), [0x1f, 0x70, 0x02, 0x0f]);
+    const d100 = AM.modelProfile('D100');
+    eq('density D100 d=2 → 15', AM.densityCommandFor(d100, 2), [0x1f, 0x70, 0x02, 0x0f]);
+    eq('density D100 d=0 → 1', AM.densityCommandFor(d100, 0), [0x1f, 0x70, 0x02, 0x01]);
+    // поток печати с профилем: P15-плотность уходит как толщина
+    const m = { data: new Uint8Array([0xf0]), bpr: 1, height: 1 };
+    const s = AM.buildPrintStream(m, { protocol: 'l', profile: p15, density: 2, copies: 1, paperType: 3 });
+    ok('buildPrintStream использует thickness для P15', s.length > 4 && s[0] === 0x10 && s[1] === 0xff && s[2] === 0x10 && s[3] === 0x00 && s[4] === 0x02);
+    // без профиля — прежнее поведение (1F 70 02 d)
+    const s2 = AM.buildPrintStream(m, { protocol: 'l', density: 1, copies: 1, paperType: 3 });
+    ok('buildPrintStream без профиля → 1F 70', s2[0] === 0x1f && s2[1] === 0x70 && s2[2] === 0x02 && s2[3] === 0x01);
+  }
 
 console.log(failed === 0 ? '\nВСЕ ТЕСТЫ ПРОЙДЕНЫ' : `\nПРОВАЛЕНО: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

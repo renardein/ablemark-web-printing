@@ -130,7 +130,11 @@ const AM = (() => {
     escInit: () => u8(0x1b, 0x40),
     beep: () => u8(0x07),
     // запросы
-    queryStatus: () => u8(0x10, 0xff, 0x3d),
+    // Статус: 10 FF 40 (Guava SignedBytes.MAX_POWER_OF_TWO в оригинале,
+    // подтверждено thermoprint). Ответ: [FF, код].
+    queryStatus: () => u8(0x10, 0xff, 0x40),
+    /** Детальный статус: 1F 20 00 — ответ с битовыми флагами. */
+    queryDetailedStatus: () => u8(0x1f, 0x20, 0x00),
     queryBattery: () => u8(0x10, 0xff, 0x50, 0xf1),
     queryVersion: () => u8(0x10, 0xff, 0x20, 0xf1),
     querySN: () => u8(0x10, 0xff, 0x20, 0xf2),
@@ -188,21 +192,35 @@ const AM = (() => {
     setThickness: (n) => u8(0x10, 0xff, 0x10, 0x00, n & 0xff),
     /** Прогон строк (ESC d n). */
     feedRowsEsc: (n) => u8(0x1b, 0x64, n & 0xff),
+    /** Тестовая страница (selfCheck). */
+    selfCheck: () => u8(0x1f, 0x40),
+    /** Обратный прогон бумаги (backoffPaper). */
+    backoff: () => u8(0x10, 0xff, 0xf2),
   };
 
   // -------------------------------------------- парсеры ответов (YXQProtocolTools) ---
   const Parsers = {
-    /** Статус (биты: 1=печать, 2=крышка, 4=нет бумаги, 8=батарея, 16=перегрев). */
+    /**
+     * Статус. Два формата:
+     *  - [FF, код] — ответ на 10 FF 40 и асинхронные уведомления (коды 1-5);
+     *  - битовые флаги — ответ на 1F 20 00 (детальный запрос):
+     *    бит1=печать, бит2=крышка, бит4=нет бумаги, бит8=батарея, бит16=перегрев.
+     * Возвращает ключ статуса ('ok'|'printing'|'no_paper'|'cover_open'|
+     * 'overheat'|'low_bat'|'cover_closed') или null.
+     */
     status(v) {
       if (!v || !v.length) return null;
+      if (v[0] === 0xff && v.length >= 2) {
+        return STATUS[v[1]] || null;
+      }
       const b = v[0];
-      if (!b) return 0;
-      if (b & 1) return 1;
-      if (b & 2) return 2;
-      if (b & 4) return 3;
-      if (b & 16) return 5;
-      if (b & 8) return 4;
-      return 0;
+      if (!b) return 'ok';
+      if (b & 1) return 'printing';
+      if (b & 2) return 'cover_open';
+      if (b & 4) return 'no_paper';
+      if (b & 16) return 'overheat';
+      if (b & 8) return 'low_bat';
+      return 'ok';
     },
 
     /** Батарея: bArr[1] (или bArr[4] для LP90); для X8 — JSON {"bat":N}. */
@@ -289,9 +307,10 @@ const AM = (() => {
     },
   };
 
+  /** Код из ответа [FF, xx] (10 FF 40) → ключ i18n status_*. */
   const STATUS = {
-    1: 'нет бумаги', 2: 'открыта крышка', 3: 'перегрев',
-    4: 'низкий заряд батареи', 5: 'крышка закрыта',
+    1: 'no_paper', 2: 'cover_open', 3: 'overheat',
+    4: 'low_bat', 5: 'cover_closed',
   };
 
   // ------------------------------------------------------ модели принтеров ---
@@ -305,28 +324,61 @@ const AM = (() => {
       id: 'l', title: 'L-серия (P11/P12/P15/P7/M1/S15/A1/LP…)',
       match: /^(P11|P12|P15|P7R?|P1S|S15|S12|M1|A1|LP15|LP90|LPC74|YEW12|Silvertec|BARABOGO|iSPACE)/i,
       protocol: 'l', direction: 1, dpi: 8, paper: [40, 30], paperType: 3,
+      packetSize: 95, packetDelayMs: 30,
+      // Marklife P15/P12/P7: плотность через толщину (10 FF 10 00 TT, hardware-проверено
+      // в thermoprint); UI-плотность 0/1/2 → байты [0,1,2]
+      densityCommand: 'thickness',
+      densityMap: [0, 1, 2],
     },
     {
       id: 'p50', title: 'P50/S2/T2/M50/M57/X2/M60/ET-Z/Jammuk',
       match: /^(P50|P5OS|PS50|P50S|T2|M50|M57|S2|Jammuk|ET-Z|X2|M60|X8|D210)/i,
       protocol: 'p50', direction: 2, dpi: 8, paper: [50, 30], paperType: 2,
+      packetSize: 95, packetDelayMs: 30,
+      // X2Protocol: app-density 1→2, 2→5, 5→15 → наша шкала 0/1/2 → [2,5,15]
+      densityCommand: 'density',
+      densityMap: [2, 5, 15],
     },
     {
       id: 'p80', title: 'P80/P80S/T3',
       match: /^(P80S?|T3)/i,
       protocol: 'l', direction: 2, dpi: 8, paper: [40, 30], paperType: 3,
+      packetSize: 237, packetDelayMs: 30,
+      densityCommand: 'density',
+      densityMap: [0, 1, 2],
     },
     {
       id: 'd100', title: 'D100/D200/X4/L100',
       match: /^(D100|D200|X4|L100|U210)/i,
       protocol: 'p50', direction: 3, dpi: 8, paper: [40, 30], paperType: 2,
+      packetSize: 237, packetDelayMs: 30,
+      // CAPrint: 1/7/15 (из RE thermoprint)
+      densityCommand: 'density',
+      densityMap: [1, 7, 15],
     },
   ];
 
   const DEFAULT_PROFILE = {
     id: 'default', title: 'неизвестная модель', protocol: 'l', direction: 2,
     dpi: 8, paper: [40, 30], paperType: 3,
+    packetSize: 237, packetDelayMs: 30,
+    densityCommand: 'density',
+    densityMap: [0, 1, 2],
   };
+
+  /**
+   * Команда установки плотности для профиля: Marklife L-серия использует
+   * толщину (10 FF 10 00 TT), остальные — 1F 70 t d. Значение берётся из
+   * densityMap профиля (индекс = UI-плотность 0=светлая/1=норма/2=тёмная).
+   */
+  function densityCommandFor(profile, uiDensity) {
+    const d = Math.max(0, Math.min(2, uiDensity | 0));
+    const value = (profile && profile.densityMap) ? profile.densityMap[d] : d;
+    if (profile && profile.densityCommand === 'thickness') {
+      return CMD.setThickness(value);
+    }
+    return CMD.setDensity(2, value);
+  }
 
   /** Профиль модели по имени устройства. */
   function modelProfile(name) {
@@ -334,9 +386,14 @@ const AM = (() => {
     for (const m of MODELS) {
       if (m.match.test(name)) {
         const p = { ...m };
-        // S2 Pro / X2 Pro — 11.8 dot/mm
-        if (/^(S2|X2).*pro/i.test(name)) p.dpi = 11.8;
+        // S2 Pro / X2 Pro — 11.8 dot/mm; таймер передачи 10 мс для S2 Pro, 1 мс для X2/M60
+        if (/^(S2|X2).*pro/i.test(name)) { p.dpi = 11.8; }
+        if (/^S2.*pro/i.test(name)) p.packetDelayMs = 10;
+        if (/^(X2|M60)/i.test(name)) p.packetDelayMs = 1;
         if (/D210H/i.test(name)) p.dpi = 12;
+        // жёсткие лимиты пакета из оригинального BluetoothPort.write():
+        // P11/P12/LP90 → 90 байт (остальная L-серия и S2-семейство уже 95)
+        if (/^(P11|P12|LP90)/i.test(name)) p.packetSize = 90;
         return p;
       }
     }
@@ -407,7 +464,9 @@ const AM = (() => {
   }
 
   /**
-   * Полутона: Floyd–Steinberg (как BitmapFlex.convertGreyImgByFloyd в оригинале).
+   * Полутона: серпантинный Floyd–Steinberg (как PrintAlgorithmTools.serpentineDither
+   * в оригинале и thermoprint). Чётные строки идут слева направо, нечётные —
+   * справа налево: меньше направленных артефактов (бандинга).
    * Для фото/градиентов. Возвращает 1bpp MSB-first.
    */
   function imageDataTo1bppDither(imgData, width, height) {
@@ -420,17 +479,25 @@ const AM = (() => {
     }
     for (let y = 0; y < height; y++) {
       const rowOff = y * bpr;
-      for (let x = 0; x < width; x++) {
+      const leftToRight = y % 2 === 0;
+      const startX = leftToRight ? 0 : width - 1;
+      const endX = leftToRight ? width : -1;
+      const step = leftToRight ? 1 : -1;
+      for (let x = startX; x !== endX; x += step) {
         const idx = y * width + x;
         const old = gray[idx];
         const dark = old < 128;
         if (dark) out[rowOff + (x >> 3)] |= (0x80 >> (x & 7));
         const err = old - (dark ? 0 : 255);
-        if (x + 1 < width) gray[idx + 1] += err * 7 / 16;
+        // сосед «вперёд» по ходу строк; «назад» — в противоположную сторону
+        const fwd = x + step, back = x - step;
+        const hasFwd = leftToRight ? fwd < width : fwd >= 0;
+        const hasBack = leftToRight ? back >= 0 : back < width;
+        if (hasFwd) gray[idx + step] += err * 7 / 16;
         if (y + 1 < height) {
-          if (x > 0) gray[idx + width - 1] += err * 3 / 16;
-          gray[idx + width] += err * 5 / 16;
-          if (x + 1 < width) gray[idx + width + 1] += err * 1 / 16;
+          if (hasBack) gray[(y + 1) * width + back] += err * 3 / 16;
+          gray[(y + 1) * width + x] += err * 5 / 16;
+          if (hasFwd) gray[(y + 1) * width + fwd] += err * 1 / 16;
         }
       }
     }
@@ -448,6 +515,8 @@ const AM = (() => {
       this.ctrlChar = null;
       this.serviceKind = null; // 'A' | 'B' | 'C' | 'GEN'
       this.packetSize = 20;    // безопасный старт; уточняется по MTU-нотификации
+      this._packetCap = null;  // аппаратный лимит пакета модели (из профиля)
+      this._packetDelayMs = 30; // пауза между пакетами (pacing, как в оригинале)
       this.credit = 0;
       this.creditMode = false;
       this.connected = false;
@@ -458,8 +527,33 @@ const AM = (() => {
       this._creditTimeouts = 0;
     }
 
+    /**
+     * Применить профиль модели: аппаратный лимит размера пакета (каппинг MTU)
+     * и межпакетную задержку. Большой BLE MTU не значит, что буфер принтера
+     * переварит большие записи — оригинальное приложение жёстко ограничивает
+     * пакет по модели (P11/P12/LP90=90, P15-семейство/S2=95, прочие=237).
+     */
+    setModelProfile(profile) {
+      if (!profile) return;
+      this._packetCap = profile.packetSize || null;
+      this._packetDelayMs = profile.packetDelayMs != null ? profile.packetDelayMs : 30;
+      if (this._packetCap && this.packetSize > this._packetCap) {
+        this.packetSize = this._packetCap;
+      }
+    }
+
     onRx(fn) { this._rxListeners.push(fn); }
     onDisconnect(fn) { this._disconnectListeners.push(fn); }
+    /** Одноразовый слушатель разрыва связи; возвращает функцию отписки. */
+    onceDisconnect(fn) {
+      const wrap = () => { this._offDisconnect(wrap); fn(); };
+      this._disconnectListeners.push(wrap);
+      return () => this._offDisconnect(wrap);
+    }
+    _offDisconnect(fn) {
+      const i = this._disconnectListeners.indexOf(fn);
+      if (i >= 0) this._disconnectListeners.splice(i, 1);
+    }
     _emitRx(v) { for (const f of this._rxListeners) { try { f(v); } catch (e) { /* ignore */ } } }
     _removeRx(fn) {
       const i = this._rxListeners.indexOf(fn);
@@ -506,6 +600,12 @@ const AM = (() => {
           // некоторым принтерам нужна пауза между connect и discover
           await sleep(150);
           await this._setupCharacteristics();
+          // Ждём стартовые кредиты на CX (обычно [01 04] приходит сразу после
+          // подписки): без них первая печать стартует с 0 кредитов и полагается
+          // на starvation recovery. Только если CX есть; до 3 с — потом идём дальше.
+          if (this.ctrlChar && this.credit <= 0) {
+            await this._waitForInitialCredits(3000);
+          }
           this.connected = true;
           this.log(`Подключено. Сервис ${this.serviceKind}, пакет ${this.packetSize} байт, credits: ${this.credit}`);
           return true;
@@ -588,7 +688,13 @@ const AM = (() => {
     _onCtrl(v) {
       if (v.length === 3 && v[0] === 0x02) {
         const mtu = (v[2] << 8) | v[1];
-        this.packetSize = Math.max(20, Math.min(244, mtu - 3));
+        // пакет = MTU−3, но не выше аппаратного лимита модели
+        let size = Math.max(20, Math.min(244, mtu - 3));
+        if (this._packetCap && size > this._packetCap) {
+          this.log(`Контроль: MTU=${mtu} → пакет ${size}, ограничен до ${this._packetCap} (лимит модели)`);
+          size = this._packetCap;
+        }
+        this.packetSize = size;
         this.log(`Контроль: MTU=${mtu}, пакет=${this.packetSize}`);
       } else if (v.length === 2 && v[0] === 0x01) {
         this.creditMode = true;
@@ -626,12 +732,36 @@ const AM = (() => {
       if (i >= 0) this._creditsWaiters.splice(i, 1);
     }
 
+    /** Ожидание стартовых кредитов после подписки на CX (как Printer.connect в thermoprint). */
+    _waitForInitialCredits(timeoutMs = 3000) {
+      if (this.credit > 0) return Promise.resolve();
+      return new Promise(resolve => {
+        const started = Date.now();
+        this.log('Ожидание стартовых кредитов…');
+        const timer = setTimeout(() => {
+          this.log('Стартовые кредиты не пришли — продолжаю без них (включится starvation recovery)');
+          resolve();
+        }, timeoutMs);
+        const check = () => {
+          if (this.credit > 0 || !this.device.gatt.connected) {
+            clearTimeout(timer);
+            resolve();
+          } else if (Date.now() - started < timeoutMs) {
+            setTimeout(check, 50);
+          }
+        };
+        check();
+      });
+    }
+
     async _writeOnce(chunk) {
-      const useResponse = this.writeChar.properties.write;
+      // оригинал ставит TX в WRITE_NO_RESPONSE (setWriteType(1));
+      // с pacing + кредитами это надёжнее — не ждём ACK BLE-стека на каждый пакет
+      const canNoResp = this.writeChar.properties.writeWithoutResponse;
       for (let t = 0; t < 4; t++) {
         try {
-          if (useResponse) await this.writeChar.writeValueWithResponse(chunk);
-          else await this.writeChar.writeValueWithoutResponse(chunk);
+          if (canNoResp) await this.writeChar.writeValueWithoutResponse(chunk);
+          else await this.writeChar.writeValueWithResponse(chunk);
           return;
         } catch (e) {
           const m = String(e && e.message || e);
@@ -653,15 +783,14 @@ const AM = (() => {
         while (index < total) {
           if (!this.device.gatt.connected) throw new Error('Соединение потеряно');
           if (this.creditMode && this.credit <= 0) {
-            const ok = await this._waitCredits(10000);
+            // starvation recovery (как в оригинале): ждём кредиты до 1 с,
+            // затем форсируем 1 кредит и продолжаем — потерянные BLE-нотификации
+            // не должны намертво вешать печать
+            const ok = await this._waitCredits(1000);
             if (!ok && this.credit <= 0) {
+              this.credit = 1;
               this._creditTimeouts++;
-              if (this._creditTimeouts >= 2) {
-                this.log('Credits не поступают — перехожу на передачу без flow-control', 'warn');
-                this.creditMode = false;
-              } else {
-                throw new Error('Таймаут ожидания credits от принтера');
-              }
+              this.log(`Starvation recovery: форсирую 1 credit (эпизод #${this._creditTimeouts})`, 'warn');
             }
           }
           let len = Math.min(this.packetSize, total - index);
@@ -688,10 +817,31 @@ const AM = (() => {
           index += len;
           const pct = Math.floor((index / total) * 100);
           if (pct !== lastReport) { lastReport = pct; onProgress && onProgress(pct, index, total); }
+          // pacing: ровно один пакет за интервал профиля (30 мс по умолчанию,
+          // как таймер в оригинальном приложении) — более быстрая отправка
+          // перегружает BLE-стек принтера, и он перестаёт выдавать кредиты
+          if (index < total && this._packetDelayMs > 0) {
+            await sleep(this._packetDelayMs);
+          }
         }
       } finally {
         this._sending = false;
       }
+    }
+
+    /** Ожидание накопления кредитов (до min штук или timeout). Для preamble/bulk ритма. */
+    waitForCredits(min = 3, timeoutMs = 1000) {
+      if (this.credit >= min) return Promise.resolve(true);
+      return new Promise(resolve => {
+        const started = Date.now();
+        const check = () => {
+          if (!this.device.gatt.connected) { resolve(false); return; }
+          if (this.credit >= min) { resolve(true); return; }
+          if (Date.now() - started >= timeoutMs) { resolve(false); return; }
+          setTimeout(check, 20);
+        };
+        check();
+      });
     }
 
     /** Короткая команда + ожидание ответа. Ставится в очередь (не конкурирует с опросом). */
@@ -731,12 +881,13 @@ const AM = (() => {
 
   // ------------------------------------------------------- print builder ---
   /**
-   * Собирает поток печати по типу протокола.
+   * Собирает команды печати по типу протокола. Возвращает массив команд,
+   * где команда-растр помечена bulk:true (см. buildPrintParts).
    * @param {object} m {data, bpr, height} — 1bpp (уже повёрнут по paperDirection)
    * @param {object} opts {protocol, density, copies, paperType, feedDots, compressed}
    *   paperType: 1=непрерывная, 2=чёрная метка, 3=наклейка (gap)
    */
-  function buildPrintStream(m, opts) {
+  function buildPrintCommands(m, opts) {
     const parts = [];
     const proto = opts.protocol || 'l';
     const copies = Math.max(1, opts.copies || 1);
@@ -746,7 +897,7 @@ const AM = (() => {
 
     if (proto === 'l') {
       // p112Print / R15Protocol: плотность → [wakeup → enable → растр → прогон → stop] × N
-      parts.push(CMD.setDensity(2, opts.density ?? 1));
+      parts.push(densityCommandFor(opts.profile, opts.density ?? 1));
       for (let i = 0; i < copies; i++) {
         parts.push(CMD.wakeupL());
         parts.push(CMD.enableL());
@@ -758,7 +909,7 @@ const AM = (() => {
     } else if (proto === 'p50') {
       // printS2 / p50Print: wakeup → density → [start → калибровка → растр → позиция → stop] × N
       parts.push(CMD.wakeupP());
-      parts.push(CMD.setDensity(2, opts.density ?? 1));
+      parts.push(densityCommandFor(opts.profile, opts.density ?? 1));
       for (let i = 0; i < copies; i++) {
         parts.push(CMD.startJobP());
         if (i === 0) parts.push(CMD.adjustAuto(81));
@@ -776,15 +927,57 @@ const AM = (() => {
       }
       parts.push(u8(0x0a));
     }
+    return parts;
+  }
+
+  /** Конкатенация команд в один байтовый поток (совместимость со старым API). */
+  function buildPrintStream(m, opts) {
     let out = new Uint8Array(0);
-    for (const p of parts) out = concat(out, p);
+    for (const p of buildPrintCommands(m, opts)) out = concat(out, p);
     return out;
+  }
+
+  /**
+   * Разбиение потока на {preamble, bulk} для кредитного ритма печати
+   * (как Printer.printBitmap в thermoprint): сначала уходят setup-команды
+   * (плотность/wakeup/enable/start), затем — после пополнения кредитов —
+   * растр с хвостовыми командами одним непрерывным потоком. Без этого
+   * принтер может начать печатать, имея в буфере лишь несколько строк.
+   * Для copies>1 возвращается массив пар [{preamble, bulk}] — по одной на копию.
+   */
+  function buildPrintParts(m, opts) {
+    const proto = opts.protocol || 'l';
+    const copies = Math.max(1, opts.copies || 1);
+    const concatAll = (arr) => {
+      let out = new Uint8Array(0);
+      for (const b of arr) out = concat(out, b);
+      return out;
+    };
+    // разрез: preamble = всё до первого bulk (команды растра), bulk = растр + хвост
+    const isImageCmd = (bytes) => {
+      if (proto === 'p50') return bytes[0] === 0x1f && bytes[1] === 0x10; // сжатый растр
+      return bytes[0] === 0x1d && bytes[1] === 0x76; // GS v 0
+    };
+
+    const commands = buildPrintCommands(m, { ...opts, copies: 1 });
+    let preamble = [], bulk = [], inBulk = false;
+    for (const cmd of commands) {
+      if (!inBulk && isImageCmd(cmd)) inBulk = true;
+      if (inBulk) bulk.push(cmd);
+      else preamble.push(cmd);
+    }
+    const pair = { preamble: concatAll(preamble), bulk: concatAll(bulk) };
+
+    // каждая копия — полная пара (как Printer.printBitmap в thermoprint)
+    const result = [];
+    for (let i = 0; i < copies; i++) result.push(pair);
+    return result;
   }
 
   return {
     UUIDS, SERVICE_FILTERS, OPTIONAL_SERVICES, NAME_PREFIXES, CMD, STATUS, Parsers,
-    MODELS, DEFAULT_PROFILE, modelProfile, rotate1bpp, parseHex,
-    AbleMarkPort, buildPrintStream, compressedImage, gsV0,
+    MODELS, DEFAULT_PROFILE, modelProfile, rotate1bpp, parseHex, densityCommandFor,
+    AbleMarkPort, buildPrintStream, buildPrintCommands, buildPrintParts, compressedImage, gsV0,
     imageDataTo1bpp, imageDataTo1bppDither, concat, u8, hex, sleep,
   };
 })();
